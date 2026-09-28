@@ -1,0 +1,6 @@
+node_modules/
+dist/
+# 写真選定の作業ファイル
+tools/_candidates.json
+tools/_c*.json
+tools/_sheets/
