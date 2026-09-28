@@ -2,6 +2,9 @@
 import React, {lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {TEMPLATES} from '../templates';
 import {AssetPicker} from './AssetPicker';
+import {LayerOverlay} from './layers/LayerOverlay';
+import {LayerPanel} from './layers/LayerPanel';
+import {resolveStyle, sceneMatches, type LayerStyle} from './layers/types';
 import {Preview, type PreviewHandle} from './Preview';
 import {Fields, type FormCtx} from './SchemaForm';
 import {durationOf, type Asset, type AssetKind} from './types';
@@ -24,6 +27,8 @@ export const App: React.FC = () => {
 	const [picking, setPicking] = useState<Picking | null>(null);
 	const [exporting, setExporting] = useState(false);
 	const [credits, setCredits] = useState(false);
+	const [editMode, setEditMode] = useState(false);
+	const [selLayer, setSelLayer] = useState<string | null>(null);
 	const preview = useRef<PreviewHandle>(null);
 	const fileInput = useRef<HTMLInputElement>(null);
 
@@ -38,6 +43,38 @@ export const App: React.FC = () => {
 	const duration = durationOf(sections);
 
 	const set = useCallback((path: (string | number)[], value: unknown) => update((c: any) => setIn(c, path, value)), [update]);
+
+	// レイアウト編集(テンプレートがレイヤーを持つ場合)
+	const defs = t.layers ?? [];
+	const overrides = ((config as any).layout ?? {}) as Record<string, Partial<LayerStyle>>;
+	const resolve = useCallback((id: string) => resolveStyle(defs.find((d) => d.id === id), overrides), [defs, overrides]);
+	const changeLayer = useCallback(
+		(id: string, patch: Partial<LayerStyle>) => update((c: any) => ({...c, layout: {...(c.layout ?? {}), [id]: {...(c.layout?.[id] ?? {}), ...patch}}})),
+		[update],
+	);
+	const resetLayer = (id: string | null) =>
+		update((c: any) => {
+			if (id === null) return {...c, layout: {}};
+			const next = {...(c.layout ?? {})};
+			delete next[id];
+			return {...c, layout: next};
+		}, false);
+	const selectLayer = (id: string | null) => {
+		setSelLayer(id);
+		if (!id) return;
+		setEditMode(true);
+		// その要素が映る場面へ移動する
+		const def = defs.find((d) => d.id === id);
+		const cur = sections.find((s) => {
+			const f = preview.current?.frame() ?? 0;
+			return f >= s.from && f < s.from + s.duration;
+		});
+		if (def && !(cur && sceneMatches(def.scene, cur.id))) {
+			const target = sections.find((s) => sceneMatches(def.scene, s.id));
+			if (target) preview.current?.seekTo(target.from + Math.floor(target.duration / 2), false);
+		}
+	};
+	const panels = defs.length ? [...t.panels, {id: '__layout', label: 'レイアウト', fields: []}] : t.panels;
 	const ctx: FormCtx = {
 		root: config,
 		set,
@@ -104,7 +141,8 @@ export const App: React.FC = () => {
 				await addUpload(blob, u.name, u.id);
 			}
 			setUploads(await listUploads());
-			update(p.config, false);
+			const tmpl = TEMPLATES.find((x) => x.id === p.template) ?? t;
+			update(tmpl.migrate ? tmpl.migrate(p.config) : p.config, false);
 		} catch (e) {
 			alert(`読み込めませんでした: ${e instanceof Error ? e.message : e}`);
 		}
@@ -160,19 +198,75 @@ export const App: React.FC = () => {
 			</header>
 			<main>
 				<section className="left">
-					<Preview ref={preview} template={t} config={config} assets={assetMap} sections={sections} duration={duration} />
+					<Preview
+						ref={preview}
+						template={t}
+						config={config}
+						assets={assetMap}
+						sections={sections}
+						duration={duration}
+						editMode={editMode}
+						overlay={(host, scene) => (
+							<LayerOverlay
+								host={host}
+								compWidth={t.width}
+								defs={defs}
+								activeScene={scene}
+								resolve={resolve}
+								selected={selLayer}
+								onSelect={(id) => {
+									setSelLayer(id);
+									if (id) setPanel('__layout');
+								}}
+								onChange={changeLayer}
+							/>
+						)}
+					/>
+					{editMode && (
+						<div className="edit-bar">
+							<span>レイアウト編集モード:プレビュー上の枠をドラッグして配置を調整できます。</span>
+							<button type="button" onClick={() => setEditMode(false)}>
+								編集を終えて再生
+							</button>
+						</div>
+					)}
+					{!editMode && defs.length > 0 && (
+						<div className="edit-bar">
+							<span>文字や部品の位置・フォント・動きを変えるには</span>
+							<button type="button" className="primary" onClick={() => {
+								setEditMode(true);
+								setPanel('__layout');
+							}}>
+								レイアウト編集
+							</button>
+						</div>
+					)}
 					<p className="muted small">編集内容はこのブラウザに自動保存されます。別の PC で続けるときは「プロジェクトを保存」したファイルを「開く」で読み込んでください。</p>
 				</section>
 				<section className="right">
 					<nav className="tabs">
-						{t.panels.map((p) => (
+						{panels.map((p) => (
 							<button type="button" key={p.id} className={panel === p.id ? 'active' : ''} onClick={() => setPanel(p.id)}>
 								{p.label}
 							</button>
 						))}
 					</nav>
 					<div className="panel">
-						<Fields fields={(t.panels.find((p) => p.id === panel) ?? t.panels[0]).fields} path={[]} ctx={ctx} />
+						{panel === '__layout' ? (
+							<LayerPanel
+								defs={defs}
+								overrides={overrides}
+								resolve={resolve}
+								selected={selLayer}
+								editMode={editMode}
+								onEditMode={setEditMode}
+								onSelect={selectLayer}
+								onChange={changeLayer}
+								onReset={resetLayer}
+							/>
+						) : (
+							<Fields fields={(t.panels.find((p) => p.id === panel) ?? t.panels[0]).fields} path={[]} ctx={ctx} />
+						)}
 					</div>
 				</section>
 			</main>

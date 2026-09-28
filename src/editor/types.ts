@@ -1,6 +1,7 @@
 // 汎用 PV エディタの型定義。
 // テンプレート(動画の中身)は Template を実装して src/templates/index.ts に登録する。
 import type React from 'react';
+import type {LayerDef} from './layers/types';
 
 /** 素材。config には素材 id だけを書き、URL は再生・書き出し時に解決する */
 export type AssetKind = 'image' | 'audio' | 'video';
@@ -16,7 +17,12 @@ export type Asset = {
 export type AssetMap = Record<string, string>; // id -> url
 
 /** テンプレートの映像コンポーネントが受け取る props */
-export type TemplateProps<C> = {config: C; assets: AssetMap};
+export type TemplateProps<C> = {
+	config: C;
+	assets: AssetMap;
+	/** エディタからの指示。settle: レイアウト編集中はアニメーションを止めて完成状態で表示する */
+	editor?: {settle?: boolean};
+};
 
 /** 編集フォームの項目定義。これを並べるだけでフォームが自動生成される */
 type Base = {key: string; label: string; help?: string};
@@ -60,6 +66,8 @@ export type Template<C = any> = {
 	sections: (config: C) => Section[];
 	/** テンプレートに同梱する素材(写真・BGM など) */
 	assets: Asset[];
+	/** レイアウト編集できるレイヤー。変更は config.layout に保存される(任意) */
+	layers?: LayerDef[];
 	/** 設定の読み込み時に古い形式を補正するなど(任意) */
 	migrate?: (config: any) => C;
 };

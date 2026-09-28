@@ -1,17 +1,23 @@
-// 日本観光 PV の映像本体。
+// 日本観光 PV の映像本体(30 秒・ポップ版)。
 // ブラウザ内書き出し(@remotion/web-renderer)に対応させるため、
 // radial-gradient / mix-blend-mode / writing-mode / z-index は使わない。
-import React, {useEffect, useState} from 'react';
-import {AbsoluteFill, continueRender, delayRender, Easing, Img, interpolate, Sequence, spring, useCurrentFrame, useVideoConfig} from 'remotion';
+import React from 'react';
+import {AbsoluteFill, Easing, Img, interpolate, random, Sequence, spring, useCurrentFrame, useVideoConfig} from 'remotion';
 import {Audio} from '@remotion/media';
 import {geoMercator} from 'd3-geo';
 import type {TemplateProps} from '../../editor/types';
-import {ENDING_LEN, INTRO_LEN, MAP_LEN, MONTAGE_LEN, SPOT_LEN, type JapanTravelConfig, type Spot} from './config';
+import {useMixedAudio} from '../../editor/audioMix';
+import {fontCss} from '../../editor/layers/fonts';
+import {L, LayerProvider, useSettle} from '../../editor/layers/runtime';
+import {ENDING_LEN, FPS, INTRO_LEN, MAP_LEN, MONTAGE_LEN, SPOT_LEN, type JapanTravelConfig, type Spot} from './config';
 import {INSET, INSET_PATH, inInset, MAIN, MAIN_PATH, MAP_H, MAP_W} from './japanMap';
+import {LAYERS} from './layers';
 
 type P = TemplateProps<JapanTravelConfig>;
 const clamp = {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'} as const;
-const ease = Easing.out(Easing.cubic);
+const INK = '#1b1b3a';
+const PREMOUNT = 30; // 場面を 1 秒前から先読みして、写真の読み込み待ちで止まらないようにする
+
 const pMain = geoMercator().scale(MAIN.scale).translate(MAIN.translate);
 const pInset = geoMercator().scale(INSET.scale).translate(INSET.translate);
 // 南西諸島は左上の別枠に描くので、投影も切り替える
@@ -38,39 +44,13 @@ const placeLabels = (pts: [number, number][], names: string[], size: number) => 
 	});
 };
 
-const fonts = (c: JapanTravelConfig) =>
-	c.style.headingFont === 'mincho'
-		? {jp: '"Shippori Mincho B1", "Noto Serif JP", serif', en: '"Cormorant Garamond", serif', enWeight: 500}
-		: {jp: '"Zen Kaku Gothic New", "Noto Sans JP", sans-serif', en: '"Montserrat", sans-serif', enWeight: 600};
-
-// 設定の全テキストのグリフを読み込み終えるまで描画を待つ(書き出し時の文字化け・フォント差し替わり防止)
-const useFontsReady = (c: JapanTravelConfig) => {
-	const [handle] = useState(() => delayRender('fonts'));
-	const text = JSON.stringify(c).replace(/[{}"\[\]:,]/g, '');
-	useEffect(() => {
-		const f = fonts(c);
-		const families = [...f.jp.split(',').slice(0, 1), ...f.en.split(',').slice(0, 1)];
-		Promise.all(families.flatMap((fam) => [400, 700].map((w) => document.fonts.load(`${w} 40px ${fam}`, text))))
-			.catch(() => undefined)
-			.finally(() => continueRender(handle));
-	}, [handle]); // eslint-disable-line react-hooks/exhaustive-deps
-};
-
 // ケン・バーンズ(ゆっくりズーム+パン)する写真
-const Photo: React.FC<{src?: string; dur: number; amount: number; dir?: number; from?: number; to?: number}> = ({
-	src,
-	dur,
-	amount,
-	dir = 1,
-	from,
-	to,
-}) => {
+const Photo: React.FC<{src?: string; dur: number; amount: number; dir?: number; zoomOut?: boolean}> = ({src, dur, amount, dir = 1, zoomOut}) => {
 	const frame = useCurrentFrame();
-	const a = from ?? (dir > 0 ? 1 : 1 + 0.12 * amount);
-	const b = to ?? (dir > 0 ? 1 + 0.12 * amount : 1);
+	const [a, b] = zoomOut ? [1 + 0.14 * amount, 1] : [1, 1 + 0.14 * amount];
 	const s = interpolate(frame, [0, dur], [a, b], clamp);
-	const x = interpolate(frame, [0, dur], [-20 * amount * dir, 20 * amount * dir], clamp);
-	if (!src) return <AbsoluteFill style={{background: '#222'}} />;
+	const x = interpolate(frame, [0, dur], [-24 * amount * dir, 24 * amount * dir], clamp);
+	if (!src) return <AbsoluteFill style={{background: '#333'}} />;
 	return (
 		<AbsoluteFill style={{overflow: 'hidden', background: '#000'}}>
 			<Img src={src} style={{width: '100%', height: '100%', objectFit: 'cover', transform: `translateX(${x}px) scale(${s})`}} />
@@ -78,53 +58,64 @@ const Photo: React.FC<{src?: string; dur: number; amount: number; dir?: number; 
 	);
 };
 
-// 1 文字ずつ下から現れる見出し
-const Chars: React.FC<{text: string; delay: number; step?: number; style: React.CSSProperties}> = ({text, delay, step = 3, style}) => {
+const Shade: React.FC<{amount: number; from?: 'bottom' | 'left'}> = ({amount, from = 'bottom'}) => (
+	<AbsoluteFill
+		style={{
+			background:
+				from === 'left'
+					? `linear-gradient(90deg, rgba(0,0,0,${amount * 1.6}) 0%, rgba(0,0,0,${amount * 0.5}) 50%, rgba(0,0,0,0) 80%)`
+					: `linear-gradient(0deg, rgba(0,0,0,${amount * 1.6}) 0%, rgba(0,0,0,${amount * 0.4}) 55%, rgba(0,0,0,${amount * 0.2}) 100%)`,
+		}}
+	/>
+);
+
+// 場面の頭で、斜めのストライプが横切る(カットの継ぎ目を隠す)
+const Sweep: React.FC<{colors: string[]}> = ({colors}) => {
+	const frame = useCurrentFrame();
+	if (frame > 12) return null;
+	return (
+		<AbsoluteFill style={{overflow: 'hidden'}}>
+			{colors.map((c, i) => {
+				const p = interpolate(frame - i * 1.5, [0, 10], [-0.3, 1.3], {...clamp, easing: Easing.inOut(Easing.cubic)});
+				return <div key={i} style={{position: 'absolute', top: -300, bottom: -300, width: 360, left: `${p * 100}%`, marginLeft: -180 + i * 150, background: c, transform: 'skewX(-20deg)'}} />;
+			})}
+		</AbsoluteFill>
+	);
+};
+
+// ふわふわ漂う紙吹雪
+const Confetti: React.FC<{colors: string[]; seed: string; count?: number}> = ({colors, seed, count = 26}) => {
 	const frame = useCurrentFrame();
 	return (
-		<div style={{display: 'flex', flexWrap: 'nowrap', whiteSpace: 'pre', ...style}}>
-			{[...text].map((ch, i) => {
-				const t = interpolate(frame - delay - i * step, [0, 14], [0, 1], {...clamp, easing: ease});
+		<AbsoluteFill>
+			{Array.from({length: count}, (_, i) => {
+				const r = (k: string) => random(`${seed}${i}${k}`);
+				const size = 10 + r('s') * 22;
+				const x = r('x') * 1920 + Math.sin(frame / 20 + r('p') * 6) * 30;
+				const y = ((r('y') * 1240 + frame * (1.5 + r('v') * 2.5)) % 1240) - 80;
+				const shape = r('k');
 				return (
-					<span key={i} style={{display: 'inline-block', opacity: t, transform: `translateY(${(1 - t) * 40}px)`}}>
-						{ch}
-					</span>
+					<div
+						key={i}
+						style={{
+							position: 'absolute',
+							left: x,
+							top: y,
+							width: size,
+							height: shape < 0.5 ? size : size * 0.45,
+							borderRadius: shape < 0.33 ? '50%' : 3,
+							background: colors[i % colors.length],
+							transform: `rotate(${frame * (2 + r('r') * 4) + r('a') * 360}deg)`,
+							opacity: 0.9,
+						}}
+					/>
 				);
 			})}
-		</div>
+		</AbsoluteFill>
 	);
 };
 
-const Fade: React.FC<{dur: number; inLen?: number; outLen?: number; children: React.ReactNode}> = ({dur, inLen = 0, outLen = 0, children}) => {
-	const frame = useCurrentFrame();
-	const o = Math.min(inLen ? interpolate(frame, [0, inLen], [0, 1], clamp) : 1, outLen ? interpolate(frame, [dur - outLen, dur], [1, 0], clamp) : 1);
-	return <AbsoluteFill style={{opacity: o}}>{children}</AbsoluteFill>;
-};
-
-// ---------------------------------------------------------------- scenes
-
-const Intro: React.FC<P> = ({config: c, assets}) => {
-	const frame = useCurrentFrame();
-	const {fps} = useVideoConfig();
-	const f = fonts(c);
-	const sun = spring({frame: frame - 18, fps, config: {damping: 14, mass: 0.8}});
-	const line = interpolate(frame, [40, 70], [0, 1], {...clamp, easing: ease});
-	return (
-		<Fade dur={INTRO_LEN} inLen={12} outLen={14}>
-			<Photo src={assets[c.intro.photo]} dur={INTRO_LEN} amount={c.style.kenBurns} from={1 + 0.15 * c.style.kenBurns} to={1} />
-			<AbsoluteFill style={{background: `linear-gradient(180deg, rgba(0,0,0,${c.style.overlay * 0.3}) 0%, rgba(0,0,0,${c.style.overlay * 1.3}) 100%)`}} />
-			<AbsoluteFill style={{justifyContent: 'center', alignItems: 'center', flexDirection: 'column', color: c.style.textColor}}>
-				<div style={{width: 120, height: 120, borderRadius: '50%', background: c.style.accent, transform: `scale(${sun})`, marginBottom: 40, boxShadow: '0 0 60px rgba(0,0,0,0.35)'}} />
-				<Chars text={c.intro.kicker} delay={28} step={1} style={{fontFamily: f.en, fontWeight: f.enWeight, fontSize: 30, letterSpacing: '0.5em', marginBottom: 24}} />
-				<Chars text={c.intro.title} delay={48} step={4} style={{fontFamily: f.jp, fontWeight: 700, fontSize: 128, textShadow: '0 6px 30px rgba(0,0,0,0.5)'}} />
-				<div style={{width: 520 * line, height: 2, background: c.style.textColor, margin: '34px 0 26px', opacity: 0.8}} />
-				<Chars text={c.intro.subtitle} delay={80} step={1} style={{fontFamily: f.en, fontStyle: 'italic', fontSize: 40, letterSpacing: '0.08em'}} />
-			</AbsoluteFill>
-		</Fade>
-	);
-};
-
-const JapanMap: React.FC<{spots: Spot[]; progress: number; active?: number; accent: string; dim?: boolean}> = ({spots, progress, active, accent, dim}) => {
+const JapanMap: React.FC<{spots: Spot[]; progress: number; active?: number; accent: string; mini?: boolean}> = ({spots, progress, active, accent, mini}) => {
 	const frame = useCurrentFrame();
 	const pts = spots.map(project);
 	const inset = spots.map((s) => inInset(s.lat, s.lng));
@@ -136,19 +127,19 @@ const JapanMap: React.FC<{spots: Spot[]; progress: number; active?: number; acce
 	});
 	return (
 		<svg viewBox={`0 0 ${MAP_W} ${MAP_H}`} width="100%" height="100%">
-			<rect x={INSET.box.x} y={INSET.box.y} width={INSET.box.w} height={INSET.box.h} fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.35)" strokeWidth={1.5} strokeDasharray="6 5" />
-			<path d={MAIN_PATH} fill="rgba(255,255,255,0.14)" stroke="rgba(255,255,255,0.55)" strokeWidth={1.4} />
-			<path d={INSET_PATH} fill="rgba(255,255,255,0.14)" stroke="rgba(255,255,255,0.55)" strokeWidth={1.4} />
-			{!dim &&
-				segs.map((s, k) => (s ? <line key={k} x1={s[0][0]} y1={s[0][1]} x2={s[1][0]} y2={s[1][1]} stroke={accent} strokeWidth={3} strokeLinecap="round" /> : null))}
+			<rect x={INSET.box.x} y={INSET.box.y} width={INSET.box.w} height={INSET.box.h} rx={16} fill="rgba(255,255,255,0.08)" stroke="#fff" strokeWidth={3} strokeDasharray="10 8" />
+			<path d={MAIN_PATH} fill={mini ? 'rgba(255,255,255,0.85)' : '#ffffff'} stroke={INK} strokeWidth={mini ? 5 : 3} strokeLinejoin="round" />
+			<path d={INSET_PATH} fill={mini ? 'rgba(255,255,255,0.85)' : '#ffffff'} stroke={INK} strokeWidth={mini ? 5 : 3} strokeLinejoin="round" />
+			{!mini && segs.map((s, k) => (s ? <line key={k} x1={s[0][0]} y1={s[0][1]} x2={s[1][0]} y2={s[1][1]} stroke={accent} strokeWidth={7} strokeLinecap="round" strokeDasharray="2 14" /> : null))}
 			{pts.map((p, i) => {
-				const shown = dim || progress * (spots.length - 1) >= i - 0.05;
+				const shown = mini || progress * (spots.length - 1) >= i - 0.05;
 				const isActive = active === i;
-				const pulse = isActive ? 1 + 0.5 * ((frame % 30) / 30) : 1;
+				const pulse = isActive ? 1 + 0.6 * ((frame % 20) / 20) : 1;
+				const r = mini ? (isActive ? 26 : 12) : 14;
 				return (
-					<g key={i} opacity={shown ? (active === undefined || isActive ? 1 : 0.45) : 0}>
-						{isActive && <circle cx={p[0]} cy={p[1]} r={14 * pulse} fill="none" stroke={spots[i].color} strokeWidth={3} opacity={2 - pulse} />}
-						<circle cx={p[0]} cy={p[1]} r={isActive ? 11 : 8} fill={spots[i].color} stroke="#fff" strokeWidth={3} />
+					<g key={i} opacity={shown ? (active === undefined || isActive ? 1 : 0.5) : 0}>
+						{isActive && <circle cx={p[0]} cy={p[1]} r={r * 1.4 * pulse} fill="none" stroke={spots[i].color} strokeWidth={6} opacity={2 - pulse} />}
+						<circle cx={p[0]} cy={p[1]} r={r} fill={spots[i].color} stroke={INK} strokeWidth={4} />
 					</g>
 				);
 			})}
@@ -156,149 +147,179 @@ const JapanMap: React.FC<{spots: Spot[]; progress: number; active?: number; acce
 	);
 };
 
-const MapScene: React.FC<P> = ({config: c}) => {
-	const frame = useCurrentFrame();
-	const f = fonts(c);
-	const progress = interpolate(frame, [10, MAP_LEN - 20], [0, 1], {...clamp, easing: Easing.inOut(Easing.quad)});
-	return (
-		<Fade dur={MAP_LEN} inLen={10} outLen={8}>
-			<AbsoluteFill style={{background: 'linear-gradient(135deg, #0b1f3a 0%, #102a4c 55%, #0b1f3a 100%)'}} />
-			<AbsoluteFill
-				style={{
-					backgroundImage: 'linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px)',
-					backgroundSize: '60px 60px',
-				}}
-			/>
-			<div style={{position: 'absolute', right: 120, top: 40, width: 1000, height: 1000}}>
-				<JapanMap spots={c.spots} progress={progress} accent={c.style.accent} />
-				{placeLabels(c.spots.map(project), c.spots.map((s) => s.name), 26).map((pos, i) => {
-					const show = interpolate(progress * (c.spots.length - 1) - i, [0, 0.4], [0, 1], clamp);
-					return (
-						<div key={i} style={{position: 'absolute', left: pos.x, top: pos.y, opacity: show, color: '#fff', fontFamily: f.jp, fontWeight: 700, fontSize: 26, lineHeight: 1.2, whiteSpace: 'nowrap', textShadow: '0 2px 8px rgba(0,0,0,0.7)'}}>
-							{c.spots[i].name}
-						</div>
-					);
-				})}
-				<div style={{position: 'absolute', left: INSET.box.x + 10, top: INSET.box.y + 8, color: 'rgba(255,255,255,0.6)', fontFamily: f.jp, fontSize: 20}}>南西諸島</div>
-			</div>
-			<div style={{position: 'absolute', left: 140, top: 400, color: '#fff'}}>
-				<Chars text={c.map.caption} delay={6} step={3} style={{fontFamily: f.jp, fontWeight: 700, fontSize: 72}} />
-				<Chars text={c.map.subtitle} delay={24} step={0.6} style={{fontFamily: f.en, fontStyle: 'italic', fontSize: 34, marginTop: 20, opacity: 0.85}} />
-			</div>
-		</Fade>
-	);
-};
+// ---------------------------------------------------------------- scenes
 
-const SpotScene: React.FC<P & {i: number}> = ({config: c, assets, i}) => {
-	const frame = useCurrentFrame();
-	const {fps} = useVideoConfig();
-	const s = c.spots[i];
-	const f = fonts(c);
-	const n = c.spots.length;
-	// 切り替わりで、テーマ色の帯が画面を横切る
-	const sweep = interpolate(frame, [0, 16], [-0.2, 1.4], {...clamp, easing: Easing.inOut(Easing.cubic)});
-	const bar = spring({frame: frame - 16, fps, config: {damping: 16}});
-	const out = interpolate(frame, [SPOT_LEN - 10, SPOT_LEN], [1, 0], clamp);
+const Intro: React.FC<P> = ({config: c, assets}) => {
+	const tokens = {accent: c.style.accent, sub: c.style.sub};
 	return (
 		<AbsoluteFill>
-			<Photo src={assets[s.photo]} dur={SPOT_LEN} amount={c.style.kenBurns} dir={i % 2 ? -1 : 1} />
-			<AbsoluteFill style={{background: `linear-gradient(90deg, rgba(0,0,0,${c.style.overlay * 1.5}) 0%, rgba(0,0,0,${c.style.overlay * 0.6}) 45%, rgba(0,0,0,0) 75%)`}} />
-			<AbsoluteFill style={{background: `linear-gradient(0deg, rgba(0,0,0,${c.style.overlay}) 0%, rgba(0,0,0,0) 40%)`}} />
-			<div style={{position: 'absolute', left: 130, bottom: 150, color: c.style.textColor, opacity: out}}>
-				<div style={{display: 'flex', alignItems: 'center', gap: 22, marginBottom: 18, opacity: interpolate(frame, [12, 22], [0, 1], clamp)}}>
-					<div style={{fontFamily: f.en, fontWeight: f.enWeight, fontSize: 30, letterSpacing: '0.2em'}}>
-						{String(i + 1).padStart(2, '0')} / {String(n).padStart(2, '0')}
-					</div>
-					<div style={{background: s.color, color: '#fff', fontFamily: f.jp, fontWeight: 700, fontSize: 26, padding: '4px 20px', borderRadius: 4}}>{s.region}</div>
-				</div>
-				<Chars text={s.name} delay={14} step={4} style={{fontFamily: f.jp, fontWeight: 700, fontSize: 170, lineHeight: 1.05, textShadow: '0 6px 30px rgba(0,0,0,0.45)'}} />
-				<Chars text={s.en} delay={24} step={1.2} style={{fontFamily: f.en, fontWeight: f.enWeight, fontSize: 40, letterSpacing: '0.45em', marginTop: 8}} />
-				<div style={{width: 140 * bar, height: 6, background: s.color, margin: '26px 0 22px'}} />
-				<Chars text={s.catch} delay={34} step={1.5} style={{fontFamily: f.jp, fontWeight: 400, fontSize: 44, textShadow: '0 2px 12px rgba(0,0,0,0.6)'}} />
-			</div>
-			<div style={{position: 'absolute', right: 70, bottom: 50, width: 330, height: 330, opacity: interpolate(frame, [18, 30], [0, 0.95], clamp) * out}}>
-				<JapanMap spots={c.spots} progress={1} active={i} accent={c.style.accent} dim />
-			</div>
-			<div
-				style={{
-					position: 'absolute',
-					top: -200,
-					bottom: -200,
-					width: 700,
-					left: `${sweep * 100}%`,
-					marginLeft: -350,
-					background: s.color,
-					transform: 'skewX(-18deg)',
-					opacity: frame < 17 ? 1 : 0,
-				}}
-			/>
+			<Photo src={assets[c.intro.photo]} dur={INTRO_LEN} amount={c.style.kenBurns} zoomOut />
+			<Shade amount={c.style.overlay} />
+			{c.style.confetti && <Confetti colors={[c.style.accent, c.style.sub, '#ffffff', '#29c7ff']} seed="intro" />}
+			<L id="intro.kicker" text={c.intro.kicker} tokens={tokens} />
+			<L id="intro.title" text={c.intro.title} tokens={tokens} />
+			<L id="intro.subtitle" text={c.intro.subtitle} tokens={tokens} />
 		</AbsoluteFill>
 	);
 };
 
-// 判子風のラベル(縦書きは 1 文字ずつ縦に積む)
-const Stamp: React.FC<{text: string; color: string; font: string}> = ({text, color, font}) => (
-	<div style={{background: color, color: '#fff', padding: '18px 14px', borderRadius: 8, border: '4px solid rgba(255,255,255,0.85)', display: 'flex', flexDirection: 'column', alignItems: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.35)'}}>
-		{[...text].map((ch, k) => (
-			<div key={k} style={{fontFamily: font, fontWeight: 700, fontSize: 64, lineHeight: 1.1}}>
-				{ch === 'ー' ? '|' : ch}
-			</div>
-		))}
-	</div>
-);
-
-const Montage: React.FC<P> = ({config: c, assets}) => {
+const MapScene: React.FC<P> = ({config: c}) => {
 	const frame = useCurrentFrame();
-	const {fps} = useVideoConfig();
-	const f = fonts(c);
-	const items = c.montage.items.length ? c.montage.items : [{photo: '', label: ''}];
-	const each = Math.floor(MONTAGE_LEN / items.length);
-	const k = Math.min(items.length - 1, Math.floor(frame / each));
-	const local = frame - k * each;
-	const item = items[k];
-	const pop = spring({frame: local - 3, fps, config: {damping: 11, stiffness: 180}});
-	const flash = interpolate(local, [0, 6], [0.35, 0], clamp);
+	const tokens = {accent: c.style.accent, sub: c.style.sub};
+	const progress = interpolate(frame, [4, MAP_LEN - 12], [0, 1], {...clamp, easing: Easing.inOut(Easing.quad)});
+	const pts = c.spots.map(project);
 	return (
 		<AbsoluteFill>
-			<Sequence key={k} from={k * each} durationInFrames={each} layout="none">
-				<Photo src={assets[item.photo]} dur={each} amount={c.style.kenBurns * 1.4} from={1 + 0.12 * c.style.kenBurns} to={1} />
-			</Sequence>
-			<AbsoluteFill style={{background: `linear-gradient(180deg, rgba(0,0,0,${c.style.overlay}) 0%, rgba(0,0,0,0) 35%)`}} />
-			<div style={{position: 'absolute', right: 150, top: 150, transform: `scale(${1.6 - 0.6 * pop}) rotate(${-8 * pop}deg)`, opacity: Math.min(1, pop * 1.5)}}>
-				<Stamp text={item.label} color={c.style.accent} font={f.jp} />
-			</div>
-			<div style={{position: 'absolute', left: 110, top: 90, color: c.style.textColor}}>
-				<div style={{fontFamily: f.jp, fontWeight: 700, fontSize: 64, textShadow: '0 4px 20px rgba(0,0,0,0.5)'}}>{c.montage.title}</div>
-				<div style={{fontFamily: f.en, fontStyle: 'italic', fontSize: 32, opacity: 0.9}}>{c.montage.subtitle}</div>
-			</div>
-			<div style={{position: 'absolute', left: 110, bottom: 80, display: 'flex', gap: 10}}>
-				{items.map((_, j) => (
-					<div key={j} style={{width: 46, height: 6, borderRadius: 3, background: j <= k ? c.style.accent : 'rgba(255,255,255,0.4)'}} />
-				))}
-			</div>
-			<AbsoluteFill style={{background: '#fff', opacity: flash}} />
+			<AbsoluteFill style={{background: `linear-gradient(135deg, ${c.style.accent} 0%, #7b2ff7 100%)`}} />
+			<AbsoluteFill
+				style={{
+					backgroundImage: 'linear-gradient(135deg, rgba(255,255,255,0.1) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.1) 50%, rgba(255,255,255,0.1) 75%, transparent 75%)',
+					backgroundSize: '90px 90px',
+					backgroundPosition: `${frame * 2}px 0`,
+				}}
+			/>
+			<L id="map.map" tokens={tokens} style={{width: 980, height: 980}}>
+				<div style={{position: 'relative', width: 980, height: 980}}>
+					<JapanMap spots={c.spots} progress={progress} accent={c.style.sub} />
+					{placeLabels(
+						pts.map(([x, y]) => [x * 0.98, y * 0.98] as [number, number]),
+						c.spots.map((s) => s.name),
+						28,
+					).map((pos, i) => {
+						const show = interpolate(progress * (c.spots.length - 1) - i, [0, 0.3], [0, 1], clamp);
+						return (
+							<div key={i} style={{position: 'absolute', left: pos.x, top: pos.y, opacity: show, transform: `scale(${0.6 + 0.4 * show})`, background: INK, color: '#fff', fontFamily: fontCss(c.style.jpFont, {jp: 'sans-serif', en: 'sans-serif'}), fontWeight: 800, fontSize: 24, lineHeight: 1.2, padding: '2px 10px', borderRadius: 999, whiteSpace: 'nowrap'}}>
+								{c.spots[i].name}
+							</div>
+						);
+					})}
+				</div>
+			</L>
+			<L id="map.caption" text={c.map.caption} tokens={{...tokens, accent: INK}} />
+			<L id="map.subtitle" text={c.map.subtitle} tokens={tokens} />
+			<Sweep colors={[c.style.sub, '#ffffff', c.style.accent]} />
+		</AbsoluteFill>
+	);
+};
+
+const SpotScene: React.FC<P & {i: number}> = ({config: c, assets, i}) => {
+	const s = c.spots[i];
+	const n = c.spots.length;
+	const tokens = {accent: s.color, sub: c.style.sub};
+	return (
+		<AbsoluteFill>
+			<Photo src={assets[s.photo]} dur={SPOT_LEN} amount={c.style.kenBurns} dir={i % 2 ? -1 : 1} />
+			<Shade amount={c.style.overlay} from="left" />
+			<Shade amount={c.style.overlay * 0.6} />
+			<L id="spot.counter" text={`${String(i + 1).padStart(2, '0')} / ${String(n).padStart(2, '0')}`} tokens={tokens} />
+			<L id="spot.tag" text={`#${s.region}`} tokens={tokens} />
+			<L id="spot.name" text={s.name} tokens={tokens} />
+			<L id="spot.en" text={s.en} tokens={tokens} />
+			<L id="spot.catch" text={s.catch} tokens={tokens} />
+			<L id="spot.minimap" tokens={tokens} style={{width: 330, height: 330}}>
+				<div style={{width: 330, height: 330}}>
+					<JapanMap spots={c.spots} progress={1} active={i} accent={s.color} mini />
+				</div>
+			</L>
+			<Sweep colors={[s.color, c.style.sub, '#ffffff']} />
+		</AbsoluteFill>
+	);
+};
+
+// 写真カードが 1 拍ずつポンポン積み重なるコラージュ
+const Montage: React.FC<P> = ({config: c, assets}) => {
+	const settle = useSettle();
+	const now = useCurrentFrame();
+	const frame = settle ? MONTAGE_LEN : now; // レイアウト編集中は全カードを表示
+	const {fps} = useVideoConfig();
+	const tokens = {accent: c.style.accent, sub: c.style.sub};
+	const items = c.montage.items;
+	const each = MONTAGE_LEN / Math.max(1, items.length);
+	const cols = Math.min(4, Math.max(1, Math.ceil(items.length / 2)));
+	const rows = Math.ceil(items.length / cols);
+	const cw = 1500 / cols;
+	const ch = Math.min(360, 700 / rows);
+	return (
+		<AbsoluteFill>
+			<AbsoluteFill style={{background: `linear-gradient(160deg, ${c.style.sub} 0%, ${c.style.accent} 100%)`}} />
+			<AbsoluteFill
+				style={{
+					backgroundImage: 'linear-gradient(135deg, rgba(255,255,255,0.14) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.14) 50%, rgba(255,255,255,0.14) 75%, transparent 75%)',
+					backgroundSize: '90px 90px',
+					backgroundPosition: `${-now * 2}px 0`,
+				}}
+			/>
+			<L id="montage.cards" tokens={tokens} style={{width: 1500, height: rows * ch}}>
+				<div style={{position: 'relative', width: 1500, height: rows * ch}}>
+					{items.map((it, k) => {
+						const p = spring({frame: frame - k * each, fps, config: {damping: 10, stiffness: 190, mass: 0.6}});
+						const col = k % cols;
+						const row = Math.floor(k / cols);
+						const rot = (random(`rot${k}`) - 0.5) * 14;
+						const w = cw * 0.86;
+						const h = ch * 0.84;
+						return (
+							<div
+								key={k}
+								style={{
+									position: 'absolute',
+									left: col * cw + (cw - w) / 2 + (random(`jx${k}`) - 0.5) * 30,
+									top: row * ch + (ch - h) / 2 + (random(`jy${k}`) - 0.5) * 20,
+									width: w,
+									height: h,
+									background: '#fff',
+									padding: 10,
+									borderRadius: 18,
+									boxShadow: `10px 10px 0 ${INK}`,
+									transform: `scale(${p}) rotate(${rot * p}deg)`,
+									opacity: frame >= k * each ? 1 : 0,
+								}}
+							>
+								<Img src={assets[it.photo]} style={{width: '100%', height: '100%', objectFit: 'cover', borderRadius: 10, display: 'block'}} />
+								<div
+									style={{
+										position: 'absolute',
+										left: -12,
+										bottom: -16,
+										background: k % 2 ? c.style.accent : INK,
+										color: '#fff',
+										fontFamily: fontCss(c.style.jpFont, {jp: 'sans-serif', en: 'sans-serif'}),
+										fontWeight: 800,
+										fontSize: 30,
+										padding: '4px 18px',
+										borderRadius: 999,
+										transform: 'rotate(-6deg)',
+										whiteSpace: 'nowrap',
+									}}
+								>
+									{it.label}
+								</div>
+							</div>
+						);
+					})}
+				</div>
+			</L>
+			<L id="montage.title" text={c.montage.title} tokens={{...tokens, accent: INK}} />
+			<L id="montage.subtitle" text={c.montage.subtitle} tokens={{...tokens, sub: '#ffffff'}} />
+			<Sweep colors={[c.style.accent, '#ffffff', c.style.sub]} />
 		</AbsoluteFill>
 	);
 };
 
 const Ending: React.FC<P> = ({config: c, assets}) => {
 	const frame = useCurrentFrame();
-	const {fps} = useVideoConfig();
-	const f = fonts(c);
-	const sun = spring({frame: frame - 6, fps, config: {damping: 18, mass: 1.2}});
+	const tokens = {accent: c.style.accent, sub: c.style.sub};
+	const fade = interpolate(frame, [ENDING_LEN - 24, ENDING_LEN], [1, 0], clamp);
 	return (
-		<Fade dur={ENDING_LEN} inLen={10} outLen={36}>
-			<Photo src={assets[c.ending.photo]} dur={ENDING_LEN} amount={c.style.kenBurns * 0.7} />
-			<AbsoluteFill style={{background: `linear-gradient(180deg, rgba(0,0,0,${c.style.overlay * 0.5}) 0%, rgba(0,0,0,${c.style.overlay * 1.4}) 100%)`}} />
-			<AbsoluteFill style={{justifyContent: 'center', alignItems: 'center', flexDirection: 'column', color: c.style.textColor}}>
-				<div style={{width: 90, height: 90, borderRadius: '50%', background: c.style.accent, transform: `scale(${sun})`, marginBottom: 44}} />
-				<Chars text={c.ending.title} delay={16} step={5} style={{fontFamily: f.jp, fontWeight: 700, fontSize: 150, textShadow: '0 6px 30px rgba(0,0,0,0.5)'}} />
-				<Chars text={c.ending.subtitle} delay={50} step={1} style={{fontFamily: f.en, fontStyle: 'italic', fontSize: 46, marginTop: 26, letterSpacing: '0.06em'}} />
-			</AbsoluteFill>
-			<div style={{position: 'absolute', left: 0, right: 0, bottom: 46, textAlign: 'center', color: 'rgba(255,255,255,0.75)', fontFamily: '"Montserrat", sans-serif', fontSize: 20, letterSpacing: '0.04em', opacity: interpolate(frame, [80, 110], [0, 1], clamp)}}>
-				{c.ending.note}
-			</div>
-		</Fade>
+		<AbsoluteFill style={{opacity: fade}}>
+			<Photo src={assets[c.ending.photo]} dur={ENDING_LEN} amount={c.style.kenBurns * 0.6} />
+			<Shade amount={c.style.overlay * 1.1} />
+			{c.style.confetti && <Confetti colors={[c.style.accent, c.style.sub, '#ffffff', '#29c7ff']} seed="ending" count={34} />}
+			<L id="ending.title" text={c.ending.title} tokens={tokens} />
+			<L id="ending.subtitle" text={c.ending.subtitle} tokens={tokens} />
+			<L id="ending.note" text={c.ending.note} tokens={tokens} />
+			<Sweep colors={[c.style.sub, c.style.accent, '#ffffff']} />
+		</AbsoluteFill>
 	);
 };
 
@@ -312,47 +333,47 @@ export const layout = (c: JapanTravelConfig) => {
 	return {intro: 0, map, spots, montage, ending, total: ending + ENDING_LEN};
 };
 
-const TAIL = 90; // BGM 各パートの余韻(3 秒)
+/** BGM のパートの並び。パートの境目は小節の頭に揃う */
+const musicParts = (c: JapanTravelConfig, t: ReturnType<typeof layout>) => [
+	{id: 'bgm:intro', at: t.intro},
+	{id: 'bgm:map', at: t.map},
+	...c.spots.map((_, i) => ({id: i % 2 ? 'bgm:spot_b' : 'bgm:spot_a', at: t.spots + i * SPOT_LEN})),
+	{id: 'bgm:montage', at: t.montage},
+	{id: 'bgm:ending', at: t.ending},
+];
 
 export const JapanTravelVideo: React.FC<P> = (props) => {
-	const {config: c, assets} = props;
-	useFontsReady(c);
+	const {config: c, assets, editor} = props;
 	const t = layout(c);
-	const vol = c.music.enabled ? c.music.volume : 0;
-	const music = [
-		{id: 'bgm:intro', from: t.intro, len: INTRO_LEN},
-		{id: 'bgm:map', from: t.map, len: MAP_LEN},
-		...c.spots.map((_, i) => ({id: i % 2 ? 'bgm:spot_b' : 'bgm:spot_a', from: t.spots + i * SPOT_LEN, len: SPOT_LEN})),
-		{id: 'bgm:montage', from: t.montage, len: MONTAGE_LEN},
-		{id: 'bgm:ending', from: t.ending, len: ENDING_LEN},
-	];
+	const parts = musicParts(c, t)
+		.filter((p) => assets[p.id])
+		.map((p) => ({url: assets[p.id], at: p.at / FPS}));
+	const bgm = useMixedAudio(c.music.enabled ? parts : [], t.total / FPS);
+	const theme = {jp: fontCss(c.style.jpFont, {jp: 'sans-serif', en: 'sans-serif'}), en: fontCss(c.style.enFont, {jp: 'sans-serif', en: 'sans-serif'})};
+	const glyphs = JSON.stringify([c.intro, c.map, c.spots.map((s) => [s.name, s.en, s.region, s.catch]), c.montage, c.ending]) + '0123456789/#!?';
+	const seq = (from: number, len: number) => ({from, durationInFrames: len, premountFor: from > 0 ? PREMOUNT : 0});
 	return (
-		<AbsoluteFill style={{background: '#000'}}>
-			<Sequence durationInFrames={INTRO_LEN} name="オープニング">
-				<Intro {...props} />
-			</Sequence>
-			<Sequence from={t.map} durationInFrames={MAP_LEN} name="地図">
-				<MapScene {...props} />
-			</Sequence>
-			{c.spots.map((s, i) => (
-				<Sequence key={i} from={t.spots + i * SPOT_LEN} durationInFrames={SPOT_LEN} name={s.name}>
-					<SpotScene {...props} i={i} />
+		<LayerProvider defs={LAYERS} overrides={c.layout} theme={theme} textColor={c.style.textColor} settle={editor?.settle} glyphs={glyphs}>
+			<AbsoluteFill style={{background: '#000'}}>
+				<Sequence {...seq(t.intro, INTRO_LEN)} name="オープニング">
+					<Intro {...props} />
 				</Sequence>
-			))}
-			<Sequence from={t.montage} durationInFrames={MONTAGE_LEN} name="モンタージュ">
-				<Montage {...props} />
-			</Sequence>
-			<Sequence from={t.ending} durationInFrames={ENDING_LEN} name="エンディング">
-				<Ending {...props} />
-			</Sequence>
-			{vol > 0 &&
-				music.map((m, i) =>
-					assets[m.id] ? (
-						<Sequence key={`a${i}`} from={m.from} durationInFrames={Math.min(m.len + TAIL, t.total - m.from)} layout="none">
-							<Audio src={assets[m.id]} volume={vol} />
-						</Sequence>
-					) : null,
-				)}
-		</AbsoluteFill>
+				<Sequence {...seq(t.map, MAP_LEN)} name="地図">
+					<MapScene {...props} />
+				</Sequence>
+				{c.spots.map((s, i) => (
+					<Sequence key={i} {...seq(t.spots + i * SPOT_LEN, SPOT_LEN)} name={s.name}>
+						<SpotScene {...props} i={i} />
+					</Sequence>
+				))}
+				<Sequence {...seq(t.montage, MONTAGE_LEN)} name="モンタージュ">
+					<Montage {...props} />
+				</Sequence>
+				<Sequence {...seq(t.ending, ENDING_LEN)} name="エンディング">
+					<Ending {...props} />
+				</Sequence>
+				{bgm && c.music.enabled && <Audio src={bgm} volume={c.music.volume} />}
+			</AbsoluteFill>
+		</LayerProvider>
 	);
 };

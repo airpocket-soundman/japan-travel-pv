@@ -1,7 +1,8 @@
-"""日本観光 PV 用のオリジナル BGM(120BPM)をパート別に合成する。第三者の音源は使っていない。
+"""日本観光 PV 用のオリジナル BGM(120BPM・ポップ)をパート別に合成する。第三者の音源は使っていない。
 
 パートは小節の頭に置いて並べる前提で、各ファイルは名目の長さ + 余韻(TAIL 秒)を持つ。
-    intro  3 小節 / map 2 小節 / spot_a, spot_b 各 2 小節(観光地ごとに交互)/ montage 4 小節 / ending 5 小節
+エディタが観光地の数に合わせてブラウザ内で 1 本に合成する(src/editor/audioMix.ts)。
+    intro 1 小節 / map 1 小節 / spot_a, spot_b 各 1 小節(観光地ごとに交互)/ montage 2 小節 / ending 3 小節
 """
 import os, wave
 import numpy as np
@@ -155,41 +156,106 @@ def melody(tr, mel, bar0=0):
         tr.add(fue(m - 12, d * BEAT), bar0 * BAR + beat_at * BEAT, gain=1.0)
 
 
+def kick(gain=1.0):
+    n = int(0.35 * SR); t = np.arange(n) / SR
+    f = 50 + 120 * np.exp(-t * 35)
+    return np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t * 8) * gain
+
+
+def clap():
+    n = int(0.22 * SR); t = np.arange(n) / SR
+    x = rng.standard_normal(n); x = lp(x - lp(x, 900), 6000)
+    e = np.exp(-t * 22) + 0.6 * np.exp(-((t - 0.012) % 0.011) * 300) * (t < 0.035)
+    return x * e * 0.55
+
+
+def hat(open_=False):
+    n = int((0.18 if open_ else 0.05) * SR); t = np.arange(n) / SR
+    x = rng.standard_normal(n); x = x - lp(x, 7000)
+    return x * np.exp(-t * (18 if open_ else 80)) * 0.3
+
+
+def pluck(ch, dur, cut=3200):
+    """シンセの和音(ノコギリ波 + フィルター)"""
+    n = int(dur * SR); t = np.arange(n) / SR
+    x = sum(2 * ((hz(m) * (1 + d) * t) % 1) - 1 for m in ch for d in (-0.004, 0.004))
+    return lp(lp(x, cut), cut) * np.exp(-t * 7) * 0.06
+
+
+def square(m, dur):
+    n = int(dur * SR); t = np.arange(n) / SR
+    vib = 1 + 0.004 * np.sin(2 * np.pi * 6 * t) * np.clip(t / 0.15, 0, 1)
+    x = np.sign(np.sin(2 * np.pi * np.cumsum(hz(m) * vib) / SR))
+    env = np.clip(t / 0.01, 0, 1) * np.clip((dur - t) / 0.03, 0, 1) * (0.75 + 0.25 * np.exp(-t * 6))
+    return lp(x, 4500) * env * 0.07
+
+
+def groove(tr, bar0, bars, claps=True, busy=True):
+    """四つ打ち + クラップ + 裏拍のオープンハイハット + 16 分のハット + 弾むベース + シンセの裏打ち"""
+    for b in range(bars):
+        t0 = b * BAR
+        root, ch = PROG[(bar0 + b) % 4]
+        for q in range(4):
+            tr.add(kick(), t0 + q * BEAT)
+            if claps and q in (1, 3): tr.add(clap(), t0 + q * BEAT, pan=0.05)
+            tr.add(hat(True), t0 + q * BEAT + BEAT / 2, pan=0.3)
+            if busy:
+                for s in (1, 3): tr.add(hat(), t0 + q * BEAT + s * BEAT / 4, pan=-0.3, gain=0.7)
+            tr.add(bass(root + (12 if q % 2 else 0), BEAT * 0.45), t0 + q * BEAT + BEAT / 2, gain=1.1)
+            tr.add(pluck([m + 12 for m in ch], BEAT * 0.45), t0 + q * BEAT + BEAT / 2, pan=-0.15 if q % 2 else 0.15)
+
+
+def riser(tr, at, dur):
+    n = int(dur * SR); x = rng.standard_normal(n)
+    x = np.concatenate([lp(x[i:i + 2048], 300 + 9000 * i / n) for i in range(0, n, 2048)])[:n]
+    tr.add(x * np.linspace(0, 1, n) ** 2 * 0.25, at)
+
+
+# ヨナ抜き音階のリード(16 分音符単位: (開始, 音, 長さ))
+LEAD_A = [(0, 74, 2), (2, 76, 2), (4, 78, 2), (6, 81, 4), (10, 78, 2), (12, 76, 4)]
+LEAD_B = [(0, 81, 2), (2, 83, 2), (4, 81, 2), (6, 78, 2), (8, 76, 4), (12, 78, 4)]
+
+
+def lead(tr, notes, bar=0, octave=0):
+    for s, m, d in notes:
+        tr.add(square(m + octave, d * BEAT / 4), bar * BAR + s * BEAT / 4, gain=1.0)
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
-    # intro: 琴のソロから始まり、3 小節目で和音が広がる
-    t = Track(3)
-    arp(t, 0, 3, density=0.8)
-    for b in range(3): t.add(pad(PROG[b % 4][1], BAR), b * BAR, gain=0.6 + 0.2 * b)
-    t.add(taiko(True), 2 * BAR + 3 * BEAT, gain=0.8); t.add(taiko(True), 2 * BAR + 3.5 * BEAT, gain=1.0)
+    # intro(1 小節): 琴のきらめき → 太鼓のフィルとライザーでドロップへ
+    t = Track(1)
+    arp(t, 0, 1, density=0.9, octave=12)
+    t.add(pad(PROG[0][1], BAR), 0, gain=0.8)
+    riser(t, 0, BAR)
+    for k in range(4): t.add(taiko(False), 2 * BEAT + k * BEAT / 2, gain=0.5 + 0.15 * k)
     t.echo(); t.write('intro')
-    # map: 太鼓が入って助走
-    t = Track(2)
-    arp(t, 3, 2); bassline(t, 3, 2); beat(t, 2, full=False)
-    for b in range(2): t.add(pad(PROG[(3 + b) % 4][1], BAR), b * BAR)
+    # map(1 小節): ドロップ。四つ打ちが入る
+    t = Track(1)
+    groove(t, 0, 1, busy=False); arp(t, 0, 1, density=0.7)
+    t.add(taiko(True), 0, gain=0.9)
     t.echo(); t.write('map')
-    # spot_a / spot_b: 観光地ごとのループ(2 小節)。旋律違いで交互に使う
-    for name, mel, bar0 in (('spot_a', MEL_A, 0), ('spot_b', MEL_B, 2)):
-        t = Track(2)
-        arp(t, bar0, 2, density=0.9); bassline(t, bar0, 2); beat(t, 2)
-        for b in range(2): t.add(pad(PROG[(bar0 + b) % 4][1], BAR), b * BAR)
-        melody(t, mel)
+    # spot_a / spot_b(各 1 小節): 旋律違いで交互に使う
+    for name, mel, bar0 in (('spot_a', LEAD_A, 1), ('spot_b', LEAD_B, 3)):
+        t = Track(1)
+        groove(t, bar0, 1); arp(t, bar0, 1, density=0.6, octave=12)
+        lead(t, mel)
         t.echo(); t.write(name)
-    # montage: 盛り上がり(旋律 A→B、1 オクターブ上の琴)
-    t = Track(4)
-    arp(t, 0, 4, octave=12); bassline(t, 0, 4); beat(t, 4)
-    for b in range(4): t.add(pad(PROG[b % 4][1], BAR), b * BAR, gain=1.3)
-    melody(t, [(a, m + 12, d) for a, m, d in MEL_A]); melody(t, [(a, m + 12, d) for a, m, d in MEL_B], bar0=2)
+    # montage(2 小節): いちばん盛り上がる。リード 1 オクターブ上 + 太鼓
+    t = Track(2)
+    groove(t, 0, 2); arp(t, 0, 2, density=0.9, octave=12)
+    lead(t, LEAD_A, 0, 12); lead(t, LEAD_B, 1, 12)
+    for b in range(2): t.add(taiko(True), b * BAR, gain=0.8)
+    riser(t, BAR + 2 * BEAT, 2 * BEAT)
     t.echo(); t.write('montage')
-    # ending: 1 小節目で決め、残りは和音と琴で静かに終わる
-    t = Track(5)
-    t.add(taiko(True), 0, gain=1.2)
-    arp(t, 0, 2, density=0.6)
-    for k, (b, ch) in enumerate([(0, PROG[0][1]), (2, PROG[2][1]), (3, PROG[3][1])]):
-        t.add(pad(ch, BAR * (2 if b == 0 else 1)), b * BAR, gain=1.2)
-    t.add(pad(PROG[0][1] + [74], BAR * 2 + TAIL), 4 * BAR, gain=1.4)
-    t.add(koto(62, 3.0), 4 * BAR); t.add(koto(69, 3.0), 4 * BAR + 0.08); t.add(koto(74, 3.0), 4 * BAR + 0.16)
-    t.add(taiko(True), 4 * BAR, gain=0.8)
+    # ending(3 小節): 1 小節目は決めのリズム、残りは和音と琴で余韻
+    t = Track(3)
+    groove(t, 0, 1)
+    lead(t, [(0, 81, 2), (2, 83, 2), (4, 86, 8)], 0)
+    t.add(kick(1.2), BAR); t.add(taiko(True), BAR, gain=1.1); t.add(clap(), BAR)
+    t.add(pad(PROG[0][1] + [74], BAR * 2 + TAIL), BAR, gain=1.5)
+    for k, m in enumerate([62, 66, 69, 74, 78]): t.add(koto(m, 3.0), BAR + k * 0.06, gain=0.8)
+    arp(t, 2, 1, density=0.4, octave=12)
     t.echo(); t.write('ending')
 
 

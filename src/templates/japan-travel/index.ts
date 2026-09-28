@@ -1,7 +1,11 @@
 import type {Asset, FieldDef, Template} from '../../editor/types';
 import credits from '../../../public/assets/photos/credits.json';
 import {defaultConfig, ENDING_LEN, FPS, INTRO_LEN, MAP_LEN, MONTAGE_LEN, SPOT_LEN, type JapanTravelConfig} from './config';
+import {FONTS} from '../../editor/layers/fonts';
+import {LAYERS} from './layers';
 import {JapanTravelVideo, layout} from './Video';
+
+const fontOptions = (group: '和文' | '欧文') => FONTS.filter((f) => f.group === group).map((f) => ({value: f.key, label: f.label}));
 
 const base = import.meta.env.BASE_URL;
 
@@ -35,12 +39,19 @@ const spotFields: FieldDef[] = [
 export const japanTravel: Template<JapanTravelConfig> = {
 	id: 'japan-travel',
 	name: '日本観光 PV',
-	description: '日本各地の観光地を地図と写真でめぐる 60 秒の PV(120BPM)',
+	description: '日本各地の観光地を地図と写真でめぐる 30 秒のポップな PV(120BPM)',
 	width: 1920,
 	height: 1080,
 	fps: FPS,
 	component: JapanTravelVideo,
 	defaultConfig,
+	layers: LAYERS,
+	// 保存形式が変わった古いデータは初期値に戻し、欠けている項目は初期値で補う
+	migrate: (saved) => {
+		if (!saved || saved.version !== defaultConfig.version) return JSON.parse(JSON.stringify(defaultConfig));
+		const d = JSON.parse(JSON.stringify(defaultConfig));
+		return {...d, ...saved, style: {...d.style, ...saved.style}, music: {...d.music, ...saved.music}, layout: saved.layout ?? {}};
+	},
 	assets: [...photoAssets, ...bgmAssets],
 	panels: [
 		{
@@ -50,14 +61,14 @@ export const japanTravel: Template<JapanTravelConfig> = {
 				{
 					type: 'list',
 					key: 'spots',
-					label: '観光地(1 か所 4 秒)',
+					label: '観光地(1 か所 2 秒)',
 					help: '北から南など、地図のルート順に並べると自然です',
 					fields: spotFields,
 					min: 1,
 					max: 16,
 					itemTitle: (s, i) => `${String(i + 1).padStart(2, '0')} ${s.name}`,
 					sectionId: (i) => `spot-${i}`,
-					newItem: () => ({name: '新しい場所', en: 'NEW PLACE', region: '', catch: 'キャッチコピー', photo: 'photo:fuji-chureito', lat: 35.68, lng: 139.76, color: '#e8384f'}),
+					newItem: () => ({name: '新スポット', en: 'NEW SPOT', region: '東京', catch: 'キャッチコピー', photo: 'photo:fuji-chureito', lat: 35.68, lng: 139.76, color: '#ff3d7f'}),
 				},
 			],
 		},
@@ -72,7 +83,7 @@ export const japanTravel: Template<JapanTravelConfig> = {
 					fields: [
 						{type: 'asset', kind: 'image', key: 'photo', label: '背景写真'},
 						{type: 'text', key: 'kicker', label: '小見出し(英字)'},
-						{type: 'text', key: 'title', label: 'タイトル'},
+						{type: 'textarea', key: 'title', label: 'タイトル', rows: 2},
 						{type: 'text', key: 'subtitle', label: 'サブタイトル'},
 					],
 				},
@@ -81,24 +92,24 @@ export const japanTravel: Template<JapanTravelConfig> = {
 					key: 'map',
 					label: '地図',
 					fields: [
-						{type: 'text', key: 'caption', label: 'キャプション'},
+						{type: 'textarea', key: 'caption', label: 'キャプション', rows: 2},
 						{type: 'text', key: 'subtitle', label: 'サブタイトル'},
 					],
 				},
 				{
 					type: 'group',
 					key: 'montage',
-					label: 'モンタージュ(8 秒)',
+					label: 'モンタージュ(4 秒)',
 					fields: [
 						{type: 'text', key: 'title', label: '見出し'},
 						{type: 'text', key: 'subtitle', label: 'サブタイトル'},
 						{
 							type: 'list',
 							key: 'items',
-							label: 'カット(8 秒を均等に分割)',
+							label: '写真カード(4 秒で順に登場)',
 							fields: [
 								{type: 'asset', kind: 'image', key: 'photo', label: '写真'},
-								{type: 'text', key: 'label', label: '判子の文字', maxLength: 6},
+								{type: 'text', key: 'label', label: 'ラベル', maxLength: 8},
 							],
 							min: 1,
 							max: 16,
@@ -129,9 +140,12 @@ export const japanTravel: Template<JapanTravelConfig> = {
 					key: 'style',
 					label: 'スタイル',
 					fields: [
-						{type: 'color', key: 'accent', label: 'アクセント色'},
+						{type: 'color', key: 'accent', label: 'テーマ色'},
+						{type: 'color', key: 'sub', label: '2 色目'},
 						{type: 'color', key: 'textColor', label: '文字色'},
-						{type: 'select', key: 'headingFont', label: '書体', options: [{value: 'mincho', label: '明朝(和風)'}, {value: 'gothic', label: 'ゴシック(モダン)'}]},
+						{type: 'select', key: 'jpFont', label: '和文フォント', options: fontOptions('和文')},
+						{type: 'select', key: 'enFont', label: '欧文フォント', options: fontOptions('欧文')},
+						{type: 'boolean', key: 'confetti', label: '紙吹雪の飾り'},
 						{type: 'number', key: 'kenBurns', label: '写真のズーム量', min: 0, max: 2, step: 0.1, slider: true},
 						{type: 'number', key: 'overlay', label: '写真の暗さ', min: 0, max: 1, step: 0.05, slider: true},
 					],
