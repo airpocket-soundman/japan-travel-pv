@@ -4,3 +4,4 @@ dist/
 tools/_candidates.json
 tools/_c*.json
 tools/_sheets/
+tools/_full_song.wav

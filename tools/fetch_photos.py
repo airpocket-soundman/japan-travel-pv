@@ -13,6 +13,8 @@ PICK = {
     'furano': ('Furano', 3), 'okinawa-kabira': ('Kabira Bay', 2),
     'ramen': ('ramen', 3), 'sakura': ('cherry blossoms Japan', 0), 'autumn-kyoto': ('autumn leaves Kyoto', 0),
     'shinkansen': ('Shinkansen', 4), 'garden-lantern': ('Japanese lanterns', 0), 'hokusai-wave': ('FujiExtra', 7),
+    'akihabara': ('Akihabara', 0), 'sushi': ('sushi restaurant Japan', 5), 'harajuku-crepe': ('Takeshita Street', 5),
+    'robot': ('robot Japan', 0), 'arcade': ('Japanese arcade', 0), 'tokyo-neon': ('Tokyo neon', 1),
 }
 c = json.load(open('tools/_candidates.json', encoding='utf-8'))
 credits = []

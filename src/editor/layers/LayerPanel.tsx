@@ -133,7 +133,7 @@ export const LayerPanel: React.FC<{
 							この要素を初期化
 						</button>
 					</div>
-					<p className="muted small">色つきの項目は初期値から変更しています。{def.scene === 'spot' ? '観光地のレイアウトは全観光地に共通です。' : ''}</p>
+					<p className="muted small">色つきの項目は初期値から変更しています。{def.scene === 'spot' ? 'この場面のレイアウトは、繰り返し出てくるすべての項目に共通です。' : ''}</p>
 
 					<fieldset className="group">
 						<legend>配置</legend>

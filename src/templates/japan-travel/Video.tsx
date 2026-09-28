@@ -1,4 +1,4 @@
-// 日本観光 PV の映像本体(30 秒・ポップ版)。
+// クールジャパン PR の映像本体(30 秒・ポップ版)。
 // ブラウザ内書き出し(@remotion/web-renderer)に対応させるため、
 // radial-gradient / mix-blend-mode / writing-mode / z-index は使わない。
 import React from 'react';
@@ -9,9 +9,10 @@ import type {TemplateProps} from '../../editor/types';
 import {useMixedAudio} from '../../editor/audioMix';
 import {fontCss} from '../../editor/layers/fonts';
 import {L, LayerProvider, useSettle} from '../../editor/layers/runtime';
-import {ENDING_LEN, FPS, INTRO_LEN, MAP_LEN, MONTAGE_LEN, SPOT_LEN, type JapanTravelConfig, type Spot} from './config';
+import {BEAT, ENDING_LEN, FPS, INTRO_LEN, MAP_LEN, MONTAGE_LEN, SPOT_LEN, type JapanTravelConfig, type Spot} from './config';
 import {INSET, INSET_PATH, inInset, MAIN, MAIN_PATH, MAP_H, MAP_W} from './japanMap';
 import {LAYERS} from './layers';
+import {Chara, CHARA_H, CHARA_W, Sparkles, SpeedLines} from './Chara';
 
 type P = TemplateProps<JapanTravelConfig>;
 const clamp = {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'} as const;
@@ -115,7 +116,7 @@ const Confetti: React.FC<{colors: string[]; seed: string; count?: number}> = ({c
 	);
 };
 
-const JapanMap: React.FC<{spots: Spot[]; progress: number; active?: number; accent: string; mini?: boolean}> = ({spots, progress, active, accent, mini}) => {
+const JapanMap: React.FC<{spots: Spot[]; progress: number; active?: number; accent: string; mini?: boolean; route?: boolean}> = ({spots, progress, active, accent, mini, route}) => {
 	const frame = useCurrentFrame();
 	const pts = spots.map(project);
 	const inset = spots.map((s) => inInset(s.lat, s.lng));
@@ -130,7 +131,7 @@ const JapanMap: React.FC<{spots: Spot[]; progress: number; active?: number; acce
 			<rect x={INSET.box.x} y={INSET.box.y} width={INSET.box.w} height={INSET.box.h} rx={16} fill="rgba(255,255,255,0.08)" stroke="#fff" strokeWidth={3} strokeDasharray="10 8" />
 			<path d={MAIN_PATH} fill={mini ? 'rgba(255,255,255,0.85)' : '#ffffff'} stroke={INK} strokeWidth={mini ? 5 : 3} strokeLinejoin="round" />
 			<path d={INSET_PATH} fill={mini ? 'rgba(255,255,255,0.85)' : '#ffffff'} stroke={INK} strokeWidth={mini ? 5 : 3} strokeLinejoin="round" />
-			{!mini && segs.map((s, k) => (s ? <line key={k} x1={s[0][0]} y1={s[0][1]} x2={s[1][0]} y2={s[1][1]} stroke={accent} strokeWidth={7} strokeLinecap="round" strokeDasharray="2 14" /> : null))}
+			{!mini && route && segs.map((s, k) => (s ? <line key={k} x1={s[0][0]} y1={s[0][1]} x2={s[1][0]} y2={s[1][1]} stroke={accent} strokeWidth={7} strokeLinecap="round" strokeDasharray="2 14" /> : null))}
 			{pts.map((p, i) => {
 				const shown = mini || progress * (spots.length - 1) >= i - 0.05;
 				const isActive = active === i;
@@ -155,7 +156,12 @@ const Intro: React.FC<P> = ({config: c, assets}) => {
 		<AbsoluteFill>
 			<Photo src={assets[c.intro.photo]} dur={INTRO_LEN} amount={c.style.kenBurns} zoomOut />
 			<Shade amount={c.style.overlay} />
+			<SpeedLines color="#ffffff" cx={1560} cy={560} />
 			{c.style.confetti && <Confetti colors={[c.style.accent, c.style.sub, '#ffffff', '#29c7ff']} seed="intro" />}
+			<L id="intro.chara" tokens={tokens} style={{width: CHARA_W, height: CHARA_H}}>
+				<Chara accent={c.style.accent} sub={c.style.sub} seed="intro" />
+			</L>
+			<Sparkles color={c.style.sub} points={[[1260, 300], [1840, 380], [1300, 760], [1880, 820]]} />
 			<L id="intro.kicker" text={c.intro.kicker} tokens={tokens} />
 			<L id="intro.title" text={c.intro.title} tokens={tokens} />
 			<L id="intro.subtitle" text={c.intro.subtitle} tokens={tokens} />
@@ -164,9 +170,11 @@ const Intro: React.FC<P> = ({config: c, assets}) => {
 };
 
 const MapScene: React.FC<P> = ({config: c}) => {
-	const frame = useCurrentFrame();
+	const settle = useSettle();
+	const now = useCurrentFrame();
+	const frame = settle ? MAP_LEN : now; // レイアウト編集中は全部のピンを表示
 	const tokens = {accent: c.style.accent, sub: c.style.sub};
-	const progress = interpolate(frame, [4, MAP_LEN - 12], [0, 1], {...clamp, easing: Easing.inOut(Easing.quad)});
+	const progress = interpolate(frame, [2, MAP_LEN - 10], [0, 1], {...clamp, easing: Easing.inOut(Easing.quad)});
 	const pts = c.spots.map(project);
 	return (
 		<AbsoluteFill>
@@ -175,18 +183,18 @@ const MapScene: React.FC<P> = ({config: c}) => {
 				style={{
 					backgroundImage: 'linear-gradient(135deg, rgba(255,255,255,0.1) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.1) 50%, rgba(255,255,255,0.1) 75%, transparent 75%)',
 					backgroundSize: '90px 90px',
-					backgroundPosition: `${frame * 2}px 0`,
+					backgroundPosition: `${now * 2}px 0`,
 				}}
 			/>
 			<L id="map.map" tokens={tokens} style={{width: 980, height: 980}}>
 				<div style={{position: 'relative', width: 980, height: 980}}>
-					<JapanMap spots={c.spots} progress={progress} accent={c.style.sub} />
+					<JapanMap spots={c.spots} progress={progress} accent={c.style.sub} route={c.style.mapRoute} />
 					{placeLabels(
 						pts.map(([x, y]) => [x * 0.98, y * 0.98] as [number, number]),
 						c.spots.map((s) => s.name),
 						28,
 					).map((pos, i) => {
-						const show = interpolate(progress * (c.spots.length - 1) - i, [0, 0.3], [0, 1], clamp);
+						const show = interpolate(progress * (c.spots.length - 1) - i + 0.3, [0, 0.3], [0, 1], clamp); // ピンと同時に出す(最後の地名も出し切る)
 						return (
 							<div key={i} style={{position: 'absolute', left: pos.x, top: pos.y, opacity: show, transform: `scale(${0.6 + 0.4 * show})`, background: INK, color: '#fff', fontFamily: fontCss(c.style.jpFont, {jp: 'sans-serif', en: 'sans-serif'}), fontWeight: 800, fontSize: 24, lineHeight: 1.2, padding: '2px 10px', borderRadius: 999, whiteSpace: 'nowrap'}}>
 								{c.spots[i].name}
@@ -194,6 +202,9 @@ const MapScene: React.FC<P> = ({config: c}) => {
 						);
 					})}
 				</div>
+			</L>
+			<L id="map.chara" tokens={tokens} style={{width: CHARA_W, height: CHARA_H}}>
+				<Chara accent={c.style.accent} sub={c.style.sub} seed="map" />
 			</L>
 			<L id="map.caption" text={c.map.caption} tokens={{...tokens, accent: INK}} />
 			<L id="map.subtitle" text={c.map.subtitle} tokens={tokens} />
@@ -234,7 +245,8 @@ const Montage: React.FC<P> = ({config: c, assets}) => {
 	const {fps} = useVideoConfig();
 	const tokens = {accent: c.style.accent, sub: c.style.sub};
 	const items = c.montage.items;
-	const each = MONTAGE_LEN / Math.max(1, items.length);
+	// 1 拍ずつカードを出し、最後の 1 小節は全体を見せる
+	const each = Math.min(BEAT, (MONTAGE_LEN - BEAT * 4) / Math.max(1, items.length));
 	const cols = Math.min(4, Math.max(1, Math.ceil(items.length / 2)));
 	const rows = Math.ceil(items.length / cols);
 	const cw = 1500 / cols;
@@ -315,6 +327,10 @@ const Ending: React.FC<P> = ({config: c, assets}) => {
 			<Photo src={assets[c.ending.photo]} dur={ENDING_LEN} amount={c.style.kenBurns * 0.6} />
 			<Shade amount={c.style.overlay * 1.1} />
 			{c.style.confetti && <Confetti colors={[c.style.accent, c.style.sub, '#ffffff', '#29c7ff']} seed="ending" count={34} />}
+			<L id="ending.chara" tokens={tokens} style={{width: CHARA_W, height: CHARA_H}}>
+				<Chara accent={c.style.accent} sub={c.style.sub} seed="ending" />
+			</L>
+			<Sparkles color="#ffffff" points={[[1300, 360], [1880, 300], [1340, 820], [1860, 760], [420, 240]]} />
 			<L id="ending.title" text={c.ending.title} tokens={tokens} />
 			<L id="ending.subtitle" text={c.ending.subtitle} tokens={tokens} />
 			<L id="ending.note" text={c.ending.note} tokens={tokens} />
@@ -337,7 +353,8 @@ export const layout = (c: JapanTravelConfig) => {
 const musicParts = (c: JapanTravelConfig, t: ReturnType<typeof layout>) => [
 	{id: 'bgm:intro', at: t.intro},
 	{id: 'bgm:map', at: t.map},
-	...c.spots.map((_, i) => ({id: i % 2 ? 'bgm:spot_b' : 'bgm:spot_a', at: t.spots + i * SPOT_LEN})),
+	// トピックのパートは 4 種類(王道進行の 1 周)を順に循環させる
+	...c.spots.map((_, i) => ({id: `bgm:spot_${'abcd'[i % 4]}`, at: t.spots + i * SPOT_LEN})),
 	{id: 'bgm:montage', at: t.montage},
 	{id: 'bgm:ending', at: t.ending},
 ];

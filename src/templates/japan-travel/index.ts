@@ -18,7 +18,7 @@ const photoAssets: Asset[] = credits.map((c) => ({
 }));
 
 const bgmCredit = {title: 'Original BGM (tools/bgm.py)', license: 'CC0', author: 'japan-travel-pv'};
-const bgmAssets: Asset[] = ['intro', 'map', 'spot_a', 'spot_b', 'montage', 'ending'].map((k) => ({
+const bgmAssets: Asset[] = ['intro', 'map', 'spot_a', 'spot_b', 'spot_c', 'spot_d', 'montage', 'ending'].map((k) => ({
 	id: `bgm:${k}`,
 	kind: 'audio',
 	label: `BGM ${k}`,
@@ -28,9 +28,9 @@ const bgmAssets: Asset[] = ['intro', 'map', 'spot_a', 'spot_b', 'montage', 'endi
 
 const spotFields: FieldDef[] = [
 	{type: 'asset', kind: 'image', key: 'photo', label: '写真'},
-	{type: 'text', key: 'name', label: '名前', maxLength: 8},
-	{type: 'text', key: 'en', label: '英語名'},
-	{type: 'text', key: 'region', label: '地域ラベル'},
+	{type: 'text', key: 'name', label: '見出し', maxLength: 8},
+	{type: 'text', key: 'en', label: '英語'},
+	{type: 'text', key: 'region', label: '場所(ハッシュタグ)'},
 	{type: 'text', key: 'catch', label: 'キャッチコピー', maxLength: 30},
 	{type: 'latlng', key: 'lat', label: '地図の位置(緯度・経度)', help: '地図のピンの位置です'},
 	{type: 'color', key: 'color', label: 'テーマ色'},
@@ -38,8 +38,8 @@ const spotFields: FieldDef[] = [
 
 export const japanTravel: Template<JapanTravelConfig> = {
 	id: 'japan-travel',
-	name: '日本観光 PV',
-	description: '日本各地の観光地を地図と写真でめぐる 30 秒のポップな PV(120BPM)',
+	name: 'クールジャパン PR',
+	description: '日本のクールなものを次々に紹介する 約 30 秒のハイテンポな PR 動画(150BPM)',
 	width: 1920,
 	height: 1080,
 	fps: FPS,
@@ -56,19 +56,19 @@ export const japanTravel: Template<JapanTravelConfig> = {
 	panels: [
 		{
 			id: 'spots',
-			label: '観光地',
+			label: 'トピック',
 			fields: [
 				{
 					type: 'list',
 					key: 'spots',
-					label: '観光地(1 か所 2 秒)',
-					help: '北から南など、地図のルート順に並べると自然です',
+					label: 'トピック(1 つ 1.6 秒)',
+					help: '地図には各トピックの場所にピンが立ちます',
 					fields: spotFields,
 					min: 1,
 					max: 16,
 					itemTitle: (s, i) => `${String(i + 1).padStart(2, '0')} ${s.name}`,
 					sectionId: (i) => `spot-${i}`,
-					newItem: () => ({name: '新スポット', en: 'NEW SPOT', region: '東京', catch: 'キャッチコピー', photo: 'photo:fuji-chureito', lat: 35.68, lng: 139.76, color: '#ff3d7f'}),
+					newItem: () => ({name: '新トピック', en: 'NEW', region: '東京', catch: 'キャッチコピー', photo: 'photo:tokyo-neon', lat: 35.68, lng: 139.76, color: '#ff2e88'}),
 				},
 			],
 		},
@@ -99,14 +99,14 @@ export const japanTravel: Template<JapanTravelConfig> = {
 				{
 					type: 'group',
 					key: 'montage',
-					label: 'モンタージュ(4 秒)',
+					label: 'モンタージュ(4.8 秒)',
 					fields: [
 						{type: 'text', key: 'title', label: '見出し'},
 						{type: 'text', key: 'subtitle', label: 'サブタイトル'},
 						{
 							type: 'list',
 							key: 'items',
-							label: '写真カード(4 秒で順に登場)',
+							label: '写真カード(1 拍ずつ順に登場)',
 							fields: [
 								{type: 'asset', kind: 'image', key: 'photo', label: '写真'},
 								{type: 'text', key: 'label', label: 'ラベル', maxLength: 8},
@@ -146,6 +146,7 @@ export const japanTravel: Template<JapanTravelConfig> = {
 						{type: 'select', key: 'jpFont', label: '和文フォント', options: fontOptions('和文')},
 						{type: 'select', key: 'enFont', label: '欧文フォント', options: fontOptions('欧文')},
 						{type: 'boolean', key: 'confetti', label: '紙吹雪の飾り'},
+						{type: 'boolean', key: 'mapRoute', label: '地図にルート線を引く(並び順)'},
 						{type: 'number', key: 'kenBurns', label: '写真のズーム量', min: 0, max: 2, step: 0.1, slider: true},
 						{type: 'number', key: 'overlay', label: '写真の暗さ', min: 0, max: 1, step: 0.05, slider: true},
 					],

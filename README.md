@@ -1,7 +1,7 @@
-# PV エディタ — 日本観光 PV
+# PV エディタ — クールジャパン PR
 
 ブラウザだけで **編集・プレビュー・MP4 書き出し** ができる PV のエディタです。
-最初のテンプレートとして、30 秒のポップな「日本観光 PV」を同梱しています。
+最初のテンプレートとして、約 30 秒のハイテンポな「クールジャパン PR」を同梱しています。
 
 **▶ エディタを開く: https://airpocket-soundman.github.io/japan-travel-pv/**
 
@@ -11,18 +11,21 @@
 - **レイアウト編集**: プレビュー上で文字や部品をドラッグして移動・拡大縮小。フォント・色・縁取り・影・登場/退場アニメーション・タイミングも要素ごとに変更できます
 - 推奨ブラウザ: Chrome / Edge(Safari ではフィルター系の効果が書き出されません)
 
-## 日本観光 PV の構成(120BPM・30 秒)
+## クールジャパン PR の構成(150BPM・28.8 秒)
 
 | 区間 | 長さ | 内容 |
 |---|---|---|
-| オープニング | 2 秒 | 河口湖の逆さ富士 + タイトル |
-| 地図 | 2 秒 | 日本地図に観光地のルートを描く(南西諸島は別枠) |
-| 観光地 × 8 | 各 2 秒 | 写真・名前・ハッシュタグ・キャッチコピー・ミニ地図 |
-| モンタージュ | 4 秒 | 写真カードが 1 拍ずつ積み重なるコラージュ |
-| エンディング | 6 秒 | 夕景の富士 + メッセージ |
+| オープニング | 3.2 秒 | 新宿のネオン + タイトル + 案内役のキャラクター |
+| 地図 | 1.6 秒 | 日本地図に各トピックの場所のピンが立つ(南西諸島は別枠) |
+| トピック × 8 | 各 1.6 秒 | 電気街・カワイイ・寿司・新幹線・浮世絵・富士山・鳥居・ネオン |
+| モンタージュ | 4.8 秒 | 写真カードが 1 拍ずつ積み重なるコラージュ |
+| エンディング | 6.4 秒 | 夕景の富士 + キャラクター + メッセージ |
 
-観光地は 1〜16 か所まで増減でき、1 か所あたり 2 秒ずつ全体の長さが変わります。
-BGM はパート別の音源を、観光地の数に合わせてブラウザ内で 1 本に合成して使うので、場面の継ぎ目で途切れません。
+トピックは 1〜16 個まで増減でき、1 つあたり 1.6 秒(1 小節)ずつ全体の長さが変わります。
+
+- **BGM**: 150BPM の和風ポップ。王道進行(G → A → F#m → Bm)に、琴・三味線・篠笛・和太鼓/締太鼓と、四つ打ち・スネア・シンセを重ねたオリジナル曲。
+  1 曲を通しで合成してから小節で切り分けたパートを、トピックの数に合わせてブラウザ内で 1 本に並べ直すので、場面の継ぎ目で途切れません
+- **キャラクター**: SVG の図形だけで描いたオリジナルのアニメ調キャラクター([Chara.tsx](src/templates/japan-travel/Chara.tsx))。まばたき・ゆれ・拍に合わせてヘッドホンが光ります
 
 ## 素材とライセンス
 
@@ -30,9 +33,10 @@ BGM はパート別の音源を、観光地の数に合わせてブラウザ内�
 
 | 素材 | 出典 | ライセンス |
 |---|---|---|
-| 写真 20 枚 | Wikimedia Commons(一覧は [public/assets/photos/credits.json](public/assets/photos/credits.json)、エディタの「クレジット」でも確認可) | CC0 / Public Domain |
+| 写真 26 枚 | Wikimedia Commons(一覧は [public/assets/photos/credits.json](public/assets/photos/credits.json)、エディタの「クレジット」でも確認可) | CC0 / Public Domain |
 | 日本地図 | [Natural Earth](https://www.naturalearthdata.com/)(world-atlas 経由) | Public Domain |
 | BGM | [tools/bgm.py](tools/bgm.py) で合成したオリジナル | CC0 |
+| キャラクター・図形 | コードで描いたオリジナル | MIT(コードと同じ) |
 | フォント | Google Fonts(Dela Gothic One / M PLUS Rounded 1c / Zen Kaku Gothic New / Shippori Mincho B1 / Zen Old Mincho / Yusei Magic / Montserrat / Bebas Neue / Cormorant Garamond / Playfair Display) | SIL Open Font License |
 
 ソースコードは MIT ライセンスです([LICENSE](LICENSE))。
@@ -53,7 +57,7 @@ npm run build    # dist/ に出力(GitHub Pages へは main への push で自�
 ```bash
 python tools/find_photos.py "Mount Fuji" "Kyoto"   # Commons で PD / CC0 の写真を検索
 python tools/fetch_photos.py                        # 選定した写真を取得し credits.json を更新
-python tools/bgm.py                                 # BGM(パート別 wav)を合成
+python tools/bgm.py                                 # BGM を合成し、パート別の wav に切り分け
 node tools/make_map.mjs                             # 日本地図の SVG パスを生成
 ```
 

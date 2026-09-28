@@ -198,5 +198,65 @@
   "source": "https://commons.wikimedia.org/wiki/File:Tsunami_by_hokusai_19th_century.jpg",
   "width": 1920,
   "height": 1291
+ },
+ {
+  "id": "akihabara",
+  "file": "assets/photos/akihabara.jpg",
+  "title": "Akiba denkigai.jpg",
+  "author": "Jmho",
+  "license": "CC0",
+  "source": "https://commons.wikimedia.org/wiki/File:Akiba_denkigai.jpg",
+  "width": 1920,
+  "height": 1225
+ },
+ {
+  "id": "sushi",
+  "file": "assets/photos/sushi.jpg",
+  "title": "JP 日本 Japan 沖繩 OKINAWA 那霸 Naha 魚屋海鮮 Izakaya 居酒屋食堂 Japanese seafood restaurant Sushi n Sashimi February 2026 N13P 08.jpg",
+  "author": "NORTLAUKAU 26088 JP",
+  "license": "CC0",
+  "source": "https://commons.wikimedia.org/wiki/File:JP_%E6%97%A5%E6%9C%AC_Japan_%E6%B2%96%E7%B9%A9_OKINAWA_%E9%82%A3%E9%9C%B8_Naha_%E9%AD%9A%E5%B1%8B%E6%B5%B7%E9%AE%AE_Izakaya_%E5%B1%85%E9%85%92%E5%B1%8B%E9%A3%9F%E5%A0%82_Japanese_seafood_restaurant_Sushi_n_Sashimi_February_2026_N13P_08.jpg",
+  "width": 1920,
+  "height": 1440
+ },
+ {
+  "id": "harajuku-crepe",
+  "file": "assets/photos/harajuku-crepe.jpg",
+  "title": "Marion Crêpes in Harajuku Takeshita 2.jpg",
+  "author": "Syced",
+  "license": "CC0",
+  "source": "https://commons.wikimedia.org/wiki/File:Marion_Cr%C3%AApes_in_Harajuku_Takeshita_2.jpg",
+  "width": 1920,
+  "height": 1440
+ },
+ {
+  "id": "robot",
+  "file": "assets/photos/robot.jpg",
+  "title": "Food delivery robot in TAKANAWA GATEWAY CITY Gateway Park.jpg",
+  "author": "電車(新幹線)でゴー！",
+  "license": "CC0",
+  "source": "https://commons.wikimedia.org/wiki/File:Food_delivery_robot_in_TAKANAWA_GATEWAY_CITY_Gateway_Park.jpg",
+  "width": 1920,
+  "height": 1440
+ },
+ {
+  "id": "arcade",
+  "file": "assets/photos/arcade.jpg",
+  "title": "Daikeien amusement arcade 2018-05-10.jpg",
+  "author": "Asanagi",
+  "license": "CC0",
+  "source": "https://commons.wikimedia.org/wiki/File:Daikeien_amusement_arcade_2018-05-10.jpg",
+  "width": 1920,
+  "height": 1440
+ },
+ {
+  "id": "tokyo-neon",
+  "file": "assets/photos/tokyo-neon.jpg",
+  "title": "Street view of Tokyo in December 1988.jpg",
+  "author": "Unknown authorUnknown author",
+  "license": "CC0",
+  "source": "https://commons.wikimedia.org/wiki/File:Street_view_of_Tokyo_in_December_1988.jpg",
+  "width": 1920,
+  "height": 1280
  }
 ]
