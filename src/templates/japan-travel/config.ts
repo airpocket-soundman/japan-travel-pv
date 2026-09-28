@@ -15,7 +15,7 @@ export type Spot = {
 export type MontageItem = {photo: string; label: string};
 
 export type JapanTravelConfig = {
-	version: 4;
+	version: 5;
 	intro: {photo: string; kicker: string; title: string; subtitle: string};
 	map: {caption: string; subtitle: string};
 	spots: Spot[];
@@ -37,18 +37,18 @@ export type JapanTravelConfig = {
 	layout: LayerOverrides;
 };
 
-// 150BPM / 30fps: 1 拍 = 12f、1 小節 = 48f(1.6 秒)。各区間は小節単位(BGM のパートと揃える)
+// 180BPM / 30fps: 1 拍 = 10f、1 小節 = 40f(1.33 秒)。各区間は小節単位(BGM のパートと揃える)
 export const FPS = 30;
-export const BEAT = 12;
-export const BAR = 48;
-export const INTRO_LEN = BAR * 2;
-export const MAP_LEN = BAR;
+export const BEAT = 10;
+export const BAR = 40;
+export const INTRO_LEN = BAR * 3;
+export const MAP_LEN = BAR * 2;
 export const SPOT_LEN = BAR;
-export const MONTAGE_LEN = BAR * 3;
-export const ENDING_LEN = BAR * 4;
+export const MONTAGE_LEN = BAR * 4;
+export const ENDING_LEN = BAR * 5;
 
 export const defaultConfig: JapanTravelConfig = {
-	version: 4,
+	version: 5,
 	intro: {
 		photo: 'photo:tokyo-neon',
 		kicker: 'COOL JAPAN',

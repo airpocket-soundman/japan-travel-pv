@@ -17,14 +17,13 @@ const photoAssets: Asset[] = credits.map((c) => ({
 	credit: {title: c.title, author: c.author, license: c.license, source: c.source},
 }));
 
+// BGM は Vite に読み込ませて、ファイル名にハッシュを付ける(作り直すと必ず新しい音源が読み込まれる)
+const bgmFiles = import.meta.glob('./bgm/*.wav', {eager: true, query: '?url', import: 'default'}) as Record<string, string>;
 const bgmCredit = {title: 'Original BGM (tools/bgm.py)', license: 'CC0', author: 'japan-travel-pv'};
-const bgmAssets: Asset[] = ['intro', 'map', 'spot_a', 'spot_b', 'spot_c', 'spot_d', 'montage', 'ending'].map((k) => ({
-	id: `bgm:${k}`,
-	kind: 'audio',
-	label: `BGM ${k}`,
-	url: `${base}assets/bgm/${k}.wav`,
-	credit: bgmCredit,
-}));
+const bgmAssets: Asset[] = Object.entries(bgmFiles).map(([path, url]) => {
+	const k = path.replace(/^.*\/(.*)\.wav$/, '$1');
+	return {id: `bgm:${k}`, kind: 'audio', label: `BGM ${k}`, url, credit: bgmCredit};
+});
 
 const spotFields: FieldDef[] = [
 	{type: 'asset', kind: 'image', key: 'photo', label: '写真'},
@@ -39,7 +38,7 @@ const spotFields: FieldDef[] = [
 export const japanTravel: Template<JapanTravelConfig> = {
 	id: 'japan-travel',
 	name: 'クールジャパン PR',
-	description: '日本のクールなものを次々に紹介する 約 30 秒のハイテンポな PR 動画(150BPM)',
+	description: '日本のクールなものを次々に紹介する 約 30 秒のハイテンポな PR 動画(180BPM)',
 	width: 1920,
 	height: 1080,
 	fps: FPS,
@@ -61,7 +60,7 @@ export const japanTravel: Template<JapanTravelConfig> = {
 				{
 					type: 'list',
 					key: 'spots',
-					label: 'トピック(1 つ 1.6 秒)',
+					label: 'トピック(1 つ 1.33 秒)',
 					help: '地図には各トピックの場所にピンが立ちます',
 					fields: spotFields,
 					min: 1,
@@ -99,7 +98,7 @@ export const japanTravel: Template<JapanTravelConfig> = {
 				{
 					type: 'group',
 					key: 'montage',
-					label: 'モンタージュ(4.8 秒)',
+					label: 'モンタージュ(5.3 秒)',
 					fields: [
 						{type: 'text', key: 'title', label: '見出し'},
 						{type: 'text', key: 'subtitle', label: 'サブタイトル'},

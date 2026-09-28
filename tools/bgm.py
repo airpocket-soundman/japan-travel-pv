@@ -1,24 +1,25 @@
-"""クールジャパン PR 用のオリジナル BGM(150BPM・和風ポップ)を合成する。第三者の音源は使っていない。
+"""クールジャパン PR 用のオリジナル BGM(180BPM・和風ハイパーポップ)を合成する。第三者の音源は使っていない。
 
 1 曲を通しで合成してから小節の境目で切り分け、パート別の wav にする。
 エディタはトピックの数に合わせてパートを隙間なく並べ直し、ブラウザ内で 1 本に合成する(src/editor/audioMix.ts)。
-並べると元の 1 曲の流れに戻るので、場面の継ぎ目で音が途切れたり重なったりしない。エコーは使わない。
+エコー・リバーブは使わない(音の余韻は各楽器の自然な減衰だけ)。
 
-    intro 2 小節 / map 1 小節 / spot_a〜spot_d 各 1 小節(王道進行 G → A → F#m → Bm を循環)/ montage 3 小節 / ending 4 小節 + 余韻
+    intro 3 小節 / map 2 小節 / spot_a〜spot_d 各 1 小節(王道進行 G → A → F#m → Bm を循環)/ montage 4 小節 / ending 5 小節 + 余韻
+出力先: src/templates/japan-travel/bgm/(Vite がファイル名にハッシュを付けるので、作り直すと必ず新しい音源が読み込まれる)
 """
 import os, wave
 import numpy as np
 from scipy.signal import lfilter
 
 SR = 44100
-BPM = 150
+BPM = 180
 BEAT = 60 / BPM
 BAR = BEAT * 4
-TAIL = 3.0  # エンディングの余韻
-OUT = os.path.join(os.path.dirname(__file__), '..', 'public', 'assets', 'bgm')
-rng = np.random.default_rng(3)
+TAIL = 2.0  # エンディングの余韻
+OUT = os.path.join(os.path.dirname(__file__), '..', 'src', 'templates', 'japan-travel', 'bgm')
+rng = np.random.default_rng(7)
 
-# D のヨナ抜き長音階(D E F# A B)。和音は J-POP・アニソンでおなじみの王道進行(IV - V - iii - vi)
+# D のヨナ抜き長音階(D E F# A B)。和音は王道進行(IV - V - iii - vi)
 PROG = [(43, [55, 59, 62]), (45, [57, 61, 64]), (42, [54, 57, 61]), (35, [59, 62, 66])]  # G - A - F#m - Bm
 
 
@@ -35,6 +36,11 @@ def hp(x, cut):
     return x - lp(x, cut)
 
 
+def env_ad(n, a, d_rate):
+    t = np.arange(n) / SR
+    return np.clip(t / a, 0, 1) * np.exp(-t * d_rate)
+
+
 def pluck_string(m, dur, decay):
     """Karplus-Strong による撥弦"""
     n = int(dur * SR); p = max(2, int(SR / hz(m)))
@@ -44,85 +50,115 @@ def pluck_string(m, dur, decay):
     return y[p:n + p]
 
 
-# ---------------------------------------------------------------- 音色(和楽器)
+# ---------------------------------------------------------------- 和楽器
 
-def koto(m, dur=1.0):
+def koto(m, dur=0.35):
+    """琴: 余韻は短め(残響っぽく聞こえないように)"""
     n = int(dur * SR)
-    return lp(pluck_string(m, dur, 0.497), 4500) * np.exp(-np.arange(n) / SR * 2.5) * 0.8
+    return lp(pluck_string(m, dur, 0.495), 5000) * np.exp(-np.arange(n) / SR * 9) * 0.8
 
 
-def shamisen(m, dur=0.3):
-    """三味線風: 撥(ばち)のアタック + 減衰の速い撥弦"""
+def shamisen(m, dur=0.22):
     n = int(dur * SR); t = np.arange(n) / SR
     bachi = hp(rng.standard_normal(n), 2500) * np.exp(-t * 250) * 0.6
-    return (lp(pluck_string(m, dur, 0.492), 6000) * np.exp(-t * 6) + bachi) * 0.7
+    return (lp(pluck_string(m, dur, 0.49), 6500) * np.exp(-t * 12) + bachi) * 0.7
 
 
 def fue(m, dur):
-    """篠笛風: ビブラートつきの正弦波 + 息の音"""
     n = int(dur * SR); t = np.arange(n) / SR
-    vib = 1 + 0.007 * np.sin(2 * np.pi * 6 * t) * np.clip((t - 0.08) / 0.15, 0, 1)
+    vib = 1 + 0.008 * np.sin(2 * np.pi * 6.5 * t) * np.clip((t - 0.06) / 0.1, 0, 1)
     ph = np.cumsum(hz(m) * vib) / SR
-    tone = np.sin(2 * np.pi * ph) + 0.25 * np.sin(4 * np.pi * ph) + 0.08 * np.sin(6 * np.pi * ph)
-    breath = lp(hp(rng.standard_normal(n), 1500), 5000) * 0.12
-    env = np.clip(t / 0.03, 0, 1) * np.clip((dur - t) / 0.05, 0, 1)
-    return (tone + breath) * env * 0.16
+    tone = np.sin(2 * np.pi * ph) + 0.25 * np.sin(4 * np.pi * ph)
+    breath = lp(hp(rng.standard_normal(n), 1500), 5000) * 0.1
+    return (tone + breath) * np.clip(t / 0.02, 0, 1) * np.clip((dur - t) / 0.03, 0, 1) * 0.14
 
 
 def taiko(big=True, gain=1.0):
-    """和太鼓(big)/ 締太鼓(小)"""
-    n = int(0.6 * SR); t = np.arange(n) / SR
-    f = (62 if big else 150) + 45 * np.exp(-t * 20)
-    body = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t * (6 if big else 14))
+    n = int(0.45 * SR); t = np.arange(n) / SR
+    f = (62 if big else 160) + 45 * np.exp(-t * 20)
+    body = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t * (8 if big else 18))
     hit = lp(rng.standard_normal(n), 1500 if big else 4000) * np.exp(-t * 70) * 0.4
     return (body + hit) * (0.9 if big else 0.5) * gain
 
 
-# ---------------------------------------------------------------- 音色(ポップ)
+# ---------------------------------------------------------------- ポップ
 
 def kick(gain=1.0):
-    n = int(0.3 * SR); t = np.arange(n) / SR
-    body = np.sin(2 * np.pi * np.cumsum(48 + 110 * np.exp(-t * 40)) / SR) * np.exp(-t * 10)
-    click = hp(rng.standard_normal(n), 3000) * np.exp(-t * 300) * 0.25
-    return (body + click) * gain
+    n = int(0.25 * SR); t = np.arange(n) / SR
+    body = np.sin(2 * np.pi * np.cumsum(46 + 140 * np.exp(-t * 45)) / SR) * np.exp(-t * 11)
+    click = hp(rng.standard_normal(n), 3000) * np.exp(-t * 400) * 0.35
+    return np.tanh((body + click) * 1.6) * gain
+
+
+def clap(gain=1.0):
+    n = int(0.16 * SR); t = np.arange(n) / SR
+    x = lp(hp(rng.standard_normal(n), 1200), 8000)
+    e = np.exp(-t * 30) + 0.7 * np.exp(-((t - 0.008) % 0.008) * 500) * (t < 0.025)
+    return x * e * 0.5 * gain
 
 
 def snare(gain=1.0):
-    n = int(0.22 * SR); t = np.arange(n) / SR
-    tone = np.sin(2 * np.pi * 190 * t) * np.exp(-t * 30) * 0.5
-    noise = lp(hp(rng.standard_normal(n), 1500), 9000) * np.exp(-t * 22) * 0.5
+    n = int(0.16 * SR); t = np.arange(n) / SR
+    tone = np.sin(2 * np.pi * 210 * t) * np.exp(-t * 35) * 0.5
+    noise = lp(hp(rng.standard_normal(n), 1800), 10000) * np.exp(-t * 28) * 0.55
     return (tone + noise) * gain
 
 
 def hat(open_=False, gain=1.0):
-    n = int((0.14 if open_ else 0.04) * SR); t = np.arange(n) / SR
-    return hp(rng.standard_normal(n), 8000) * np.exp(-t * (22 if open_ else 90)) * 0.2 * gain
+    n = int((0.1 if open_ else 0.03) * SR); t = np.arange(n) / SR
+    return hp(rng.standard_normal(n), 8500) * np.exp(-t * (30 if open_ else 110)) * 0.22 * gain
 
 
-def bass(m, dur):
+def crash(gain=1.0):
+    n = int(1.4 * SR); t = np.arange(n) / SR
+    return hp(rng.standard_normal(n), 5000) * np.exp(-t * 3.2) * 0.3 * gain
+
+
+def impact(gain=1.0):
+    """ドロップの頭の「ドーン」"""
+    n = int(0.9 * SR); t = np.arange(n) / SR
+    boom = np.sin(2 * np.pi * np.cumsum(38 + 80 * np.exp(-t * 12)) / SR) * np.exp(-t * 4)
+    return np.tanh(boom * 2) * 0.8 * gain
+
+
+def supersaw(ch, dur, cut=5000, voices=7, detune=0.018):
     n = int(dur * SR); t = np.arange(n) / SR
-    x = np.sin(2 * np.pi * hz(m) * t) + 0.35 * np.sin(4 * np.pi * hz(m) * t) + 0.15 * np.sin(6 * np.pi * hz(m) * t)
-    env = np.clip(t / 0.004, 0, 1) * np.clip((dur - t) / 0.02, 0, 1) * (0.7 + 0.3 * np.exp(-t * 8))
-    return x * env * 0.3
+    x = np.zeros(n)
+    for m in ch:
+        for v in range(voices):
+            d = 1 + detune * (v - (voices - 1) / 2) / ((voices - 1) / 2)
+            ph0 = rng.random()
+            x += 2 * ((hz(m) * d * t + ph0) % 1) - 1
+    x /= voices
+    return lp(lp(x, cut), cut * 1.5) * np.clip(t / 0.005, 0, 1) * np.clip((dur - t) / 0.02, 0, 1) * 0.06
 
 
-def saw_chord(ch, dur, cut=2600):
+def saw_bass(m, dur):
     n = int(dur * SR); t = np.arange(n) / SR
-    x = sum(2 * ((hz(m) * (1 + d) * t) % 1) - 1 for m in ch for d in (-0.005, 0.005))
-    env = np.clip(t / 0.01, 0, 1) * np.clip((dur - t) / 0.05, 0, 1)
-    return lp(lp(x, cut), cut) * env * 0.035
+    x = 2 * ((hz(m) * t) % 1) - 1 + 0.6 * np.sin(2 * np.pi * hz(m) * t)
+    return lp(x, 900) * np.clip(t / 0.003, 0, 1) * np.clip((dur - t) / 0.01, 0, 1) * 0.32
 
 
-def riser(dur):
+def lead(m, dur):
+    """キラキラのリード(矩形波 + ノコギリ波)"""
+    n = int(dur * SR); t = np.arange(n) / SR
+    ph = hz(m) * t
+    x = np.sign(np.sin(2 * np.pi * ph)) * 0.6 + (2 * (ph % 1) - 1) * 0.4 + np.sign(np.sin(4 * np.pi * ph * 1.003)) * 0.25
+    return lp(x, 7000) * np.clip(t / 0.004, 0, 1) * np.clip((dur - t) / 0.015, 0, 1) * (0.7 + 0.3 * np.exp(-t * 10)) * 0.06
+
+
+def riser(dur, gain=1.0):
     n = int(dur * SR); x = rng.standard_normal(n)
-    x = np.concatenate([lp(x[i:i + 1024], 400 + 8000 * i / n) for i in range(0, n, 1024)])[:n]
-    return x * np.linspace(0, 1, n) ** 2 * 0.18
+    x = np.concatenate([lp(x[i:i + 512], 300 + 12000 * (i / n) ** 2) for i in range(0, n, 512)])[:n]
+    t = np.arange(n) / SR
+    sweep = np.sin(2 * np.pi * np.cumsum(200 + 1800 * (t / dur) ** 2) / SR) * 0.3
+    return (x + sweep) * np.linspace(0, 1, n) ** 2 * 0.22 * gain
 
 
 # ---------------------------------------------------------------- 曲
 
 class Song:
-    """小節単位で音を置いていく。drums / music の 2 系統で、music はキックに合わせて音量を揺らす(サイドチェイン)"""
+    """drums / music の 2 系統。music はキックに合わせて強めに揺らす(サイドチェインのポンピング)"""
 
     def __init__(self, bars):
         self.n = int((bars * BAR + TAIL) * SR)
@@ -130,7 +166,7 @@ class Song:
 
     def add(self, x, bar, beat=0.0, bus='music', pan=0.0, gain=1.0):
         s = int(round((bar * BAR + beat * BEAT) * SR))
-        if s >= self.n: return
+        if s >= self.n or s < 0: return
         x = x[: self.n - s] * gain
         buf = self.drums if bus == 'drums' else self.music
         buf[s:s + len(x), 0] += x * (1 - pan); buf[s:s + len(x), 1] += x * (1 + pan)
@@ -140,132 +176,138 @@ class Song:
 
     def render(self):
         duck = np.ones(self.n)
-        for k in self.kicks:  # キックの瞬間に music を少し下げて、ふわっと戻す
-            s = int(k * SR); m = min(self.n - s, int(0.22 * SR))
-            duck[s:s + m] = np.minimum(duck[s:s + m], 0.6 + 0.4 * (np.arange(m) / m) ** 0.7)
+        for k in self.kicks:
+            s = int(k * SR); m = min(self.n - s, int(BEAT * 0.9 * SR))
+            duck[s:s + m] = np.minimum(duck[s:s + m], 0.25 + 0.75 * (np.arange(m) / m) ** 0.6)
         mix = self.drums + self.music * duck[:, None]
-        mix = np.tanh(mix / np.abs(mix).max() * 1.3)
-        return mix / np.abs(mix).max() * 0.88
+        mix = np.tanh(mix / np.abs(mix).max() * 1.8)  # 音圧を上げる
+        return mix / np.abs(mix).max() * 0.9
 
 
-def groove(song, bar, full=True):
-    """四つ打ち + スネア + 16 分のハイハット + 8 分で刻むベース + 裏打ちのシンセ和音"""
-    root, ch = PROG[bar % 4]
+def drums(song, bar, level=2):
+    """level 0: キックのみ / 1: + クラップ・裏のハイハット / 2: + 16 分のハイハット"""
     for q in range(4):
         song.kick(bar, q)
-        if q in (1, 3): song.add(snare(), bar, q, 'drums', pan=0.05)
-        song.add(hat(True, 0.8), bar, q + 0.5, 'drums', pan=0.3)
-        if full:
-            for s16 in (0.25, 0.75): song.add(hat(False, 0.7), bar, q + s16, 'drums', pan=-0.3)
-        for e in (0, 0.5):  # 8 分でオクターブを行き来するベース
-            song.add(bass(root + (12 if e else 0), BEAT * 0.45), bar, q + e, gain=0.9)
-        song.add(saw_chord([m + 12 for m in ch], BEAT * 0.35), bar, q + 0.5, pan=0.15 if q % 2 else -0.15)
+        if level >= 1:
+            if q in (1, 3): song.add(clap(), bar, q, 'drums'); song.add(snare(0.6), bar, q, 'drums')
+            song.add(hat(True), bar, q + 0.5, 'drums', pan=0.3)
+        if level >= 2:
+            for s in (0.25, 0.75): song.add(hat(False, 0.8), bar, q + s, 'drums', pan=-0.3)
 
 
-def koto_arp(song, bar, density=1.0, octave=12, gain=0.55, sixteenth=False):
-    root, ch = PROG[bar % 4]
+def snare_roll(song, bar, beats=4, start=0.0, gain=0.9):
+    """ドロップ前の加速するスネア連打(8 分 → 16 分 → 32 分)"""
+    t = start; end = start + beats
+    while t < end - 1e-6:
+        prog = (t - start) / beats
+        step = 0.5 if prog < 0.4 else 0.25 if prog < 0.8 else 0.125
+        song.add(snare(gain * (0.4 + 0.6 * prog)), bar, t, 'drums')
+        t += step
+
+
+def chords(song, bar, pb, level=1.0, stutter=False):
+    """裏拍で跳ねるスーパーソウ。stutter で最後の拍を 16 分で刻む"""
+    root, ch = PROG[pb % 4]
+    notes = [m + 12 for m in ch] + [ch[0] + 24]
+    for q in range(4):
+        if stutter and q == 3:
+            for s in range(4): song.add(supersaw(notes, BEAT * 0.2), bar, q + s * 0.25, gain=level)
+        else:
+            song.add(supersaw(notes, BEAT * 0.9), bar, q, gain=level)
+
+
+def bassline(song, bar, pb):
+    root, _ = PROG[pb % 4]
+    for q in range(4):
+        song.add(saw_bass(root, BEAT * 0.45), bar, q + 0.5)
+        song.add(saw_bass(root + 12, BEAT * 0.2), bar, q + 0.75, gain=0.7)
+
+
+def koto16(song, bar, pb, gain=0.5, up=12):
+    _, ch = PROG[pb % 4]
     notes = [ch[0], ch[1], ch[2], ch[1] + 12, ch[2] + 12, ch[1] + 12, ch[0] + 12, ch[2]]
-    step = 0.25 if sixteenth else 0.5
-    for e in range(int(4 / step)):
-        if rng.random() <= density:
-            song.add(koto(notes[e % 8] + octave, 0.9), bar, e * step, pan=0.35 if e % 2 else -0.35, gain=gain)
+    for e in range(16):
+        song.add(koto(notes[e % 8] + up), bar, e * 0.25, pan=0.4 if e % 2 else -0.4, gain=gain)
 
 
-def shamisen_riff(song, bar, gain=0.5):
-    """三味線の刻み(16 分・裏にアクセント)"""
-    root, ch = PROG[bar % 4]
-    pat = [ch[0] + 12, ch[2], ch[1] + 12, ch[2]]
+def shamisen16(song, bar, pb, gain=0.5):
+    _, ch = PROG[pb % 4]
+    pat = [ch[0] + 12, ch[2], ch[1] + 12, ch[2], ch[0] + 24, ch[2], ch[1] + 12, ch[2]]
     for k in range(16):
-        song.add(shamisen(pat[k % 4], 0.3), bar, k * 0.25, pan=0.25, gain=gain * (1.0 if k % 4 == 2 else 0.6))
+        song.add(shamisen(pat[k % 8]), bar, k * 0.25, pan=0.25, gain=gain * (1.0 if k % 4 == 2 else 0.55))
 
 
-def shime_roll(song, bar, beat_from, beats, gain=0.5):
-    """締太鼓の連打(だんだん大きく)"""
-    n = int(beats * 4)
-    for k in range(n):
-        song.add(taiko(False, gain * (0.5 + 0.5 * k / n)), bar, beat_from + k * 0.25, 'drums')
-
-
-# 4 小節で 1 周する篠笛の旋律(ヨナ抜き)。(拍, 音, 長さ[拍])
-MELODY = [
-    [(0, 83, 0.5), (0.5, 81, 0.5), (1, 78, 0.5), (1.5, 81, 0.5), (2, 83, 1), (3, 86, 1)],  # G
-    [(0, 86, 0.5), (0.5, 83, 0.5), (1, 81, 1), (2, 78, 0.5), (2.5, 76, 0.5), (3, 78, 1)],  # A
-    [(0, 81, 0.5), (0.5, 78, 0.5), (1, 76, 1), (2, 78, 0.5), (2.5, 81, 0.5), (3, 83, 1)],  # F#m
-    [(0, 86, 1.5), (1.5, 83, 0.5), (2, 81, 1), (3, 78, 0.5), (3.5, 76, 0.5)],  # Bm
+# 4 小節で 1 周する 16 分のリード(ヨナ抜き)。(16 分の位置, 音, 長さ[16 分])
+HOOK = [
+    [(0, 83, 2), (2, 86, 1), (3, 88, 1), (4, 90, 2), (6, 88, 1), (7, 86, 1), (8, 83, 2), (10, 86, 2), (12, 88, 4)],
+    [(0, 90, 2), (2, 88, 1), (3, 86, 1), (4, 88, 2), (6, 90, 2), (8, 93, 2), (10, 90, 1), (11, 88, 1), (12, 86, 4)],
+    [(0, 85, 2), (2, 86, 1), (3, 88, 1), (4, 85, 2), (6, 81, 2), (8, 83, 2), (10, 85, 2), (12, 88, 4)],
+    [(0, 86, 2), (2, 83, 1), (3, 81, 1), (4, 83, 2), (6, 86, 2), (8, 88, 1), (9, 90, 1), (10, 93, 2), (12, 95, 4)],
 ]
 
 
-def melody(song, bar, octave=0, gain=1.0):
-    for b, m, d in MELODY[bar % 4]:
-        song.add(fue(m - 12 + octave, d * BEAT * 0.95), bar, b, gain=gain)
+def hook(song, bar, pb, octave=0, gain=1.0, with_fue=True):
+    for s, m, d in HOOK[pb % 4]:
+        song.add(lead(m + octave, d * BEAT / 4 * 0.92), bar, s / 4, gain=gain)
+        if with_fue and d >= 2:
+            song.add(fue(m - 12 + octave, d * BEAT / 4 * 0.92), bar, s / 4, gain=0.7 * gain)
 
 
 def main():
     os.makedirs(OUT, exist_ok=True)
-    # 通しの構成: intro x2 | map | topic a b c d a b c d | montage x3 | ending x4
-    #   bar:      0  1     2     3 ................. 10   11 12 13    14 15 16 17
-    # PROG[bar % 4] で和音が決まるので、トピックの 1 つ目(bar 3)が G から始まるよう小節番号をずらす
-    song = Song(18)
-    off = 1  # bar 3 + off = 4 → PROG[0] = G
-    B = lambda b: b + off  # 和音を決めるための小節番号
-    # intro: 琴の速い分散和音 → 2 小節目の後半で締太鼓の連打とライザー → ドン
-    for b in (0, 1):
-        for e in range(16):
-            _, ch = PROG[0]
-            notes = [ch[0], ch[1], ch[2], ch[1] + 12, ch[2] + 12, ch[1] + 12, ch[0] + 12, ch[2]]
-            song.add(koto(notes[e % 8] + 12, 0.9), b, e * 0.25, pan=0.35 if e % 2 else -0.35, gain=0.55 + 0.1 * b)
-    song.add(saw_chord([55, 59, 62, 67], BAR * 2, cut=1500) * 1.2, 0)
-    song.add(riser(BAR), 1)
-    shime_roll(song, 1, 2, 1.5, 0.8)
-    song.add(taiko(True, 1.2), 1, 3.5, 'drums')
+    for f in os.listdir(OUT):
+        if f.endswith('.wav'): os.remove(os.path.join(OUT, f))
+    # 通しの構成(小節): intro 0-2 | map 3-4 | topic 5-12(王道進行を 2 周)| montage 13-16 | ending 17-21
+    song = Song(22)
+    pb = lambda bar: bar - 5  # トピックの 1 つ目(bar 5)が G になるように和音の番号をずらす
 
-    def at(fn, bar, *a, **k):
-        """groove / melody などは bar % 4 で和音を選ぶので、和音用の小節番号で呼び、置く位置だけ実際の小節 bar にする"""
-        pb = B(bar)
-        shift = bar - pb
-
-        class Proxy:
-            def add(self_, x, b, beat=0.0, bus='music', pan=0.0, gain=1.0):
-                song.add(x, b + shift, beat, bus, pan, gain)
-
-            def kick(self_, b, beat, gain=1.0):
-                song.kick(b + shift, beat, gain)
-
-        fn(Proxy(), pb, *a, **k)
-
-    # map: ドロップ
-    song.add(taiko(True, 1.3), 2, 0, 'drums')
-    at(groove, 2); at(koto_arp, 2, density=0.8)
-    # トピック: グルーヴ + 篠笛の旋律 + 琴(王道進行を 2 周)
-    for bar in range(3, 11):
-        at(groove, bar)
-        at(melody, bar)
-        at(koto_arp, bar, density=0.5, gain=0.45)
-        if B(bar) % 4 == 3: shime_roll(song, bar, 3, 1, 0.5)  # 4 小節ごとに締太鼓のフィル
-    # montage: いちばん盛り上がる(旋律 1 オクターブ上 + 三味線の刻み + 太鼓)
-    for bar in (11, 12, 13):
-        at(groove, bar); at(melody, bar, octave=12, gain=0.85); at(shamisen_riff, bar)
-        song.add(taiko(True), bar, 0, 'drums'); song.add(taiko(True, 0.8), bar, 2, 'drums')
-    shime_roll(song, 13, 2, 2, 0.8)
-    song.add(riser(BEAT * 2), 13, 2)
-    # ending: 1 小節目で決め、残りは D の和音・琴・篠笛のロングトーンで余韻
-    at(groove, 14); at(melody, 14, octave=12, gain=0.85); at(shamisen_riff, 14, 0.4)
-    song.kick(15, 0, 1.3); song.add(taiko(True, 1.3), 15, 0, 'drums'); song.add(snare(1.2), 15, 0, 'drums')
-    song.add(saw_chord([62, 66, 69, 74], BAR * 3 + TAIL, cut=1600) * 1.6, 15)
-    song.add(bass(38, BAR * 2), 15)
-    for k, m in enumerate([62, 66, 69, 74, 78, 81, 86]): song.add(koto(m, 3.0), 15, k * 0.15, pan=(k - 3) / 6, gain=0.7)
-    song.add(fue(74, BAR * 2.5), 15, 1, gain=0.8)
+    # intro: 琴の 16 分 → 締太鼓とスネアの連打・ライザーで溜めて…
+    for b in (0, 1, 2):
+        koto16(song, b, 0, gain=0.35 + 0.12 * b)
+        song.add(supersaw([55, 59, 62, 67], BAR, cut=800 + 1500 * b), b, gain=0.8)
+    for q in range(4): song.add(taiko(True, 0.8), 1, q, 'drums')
+    snare_roll(song, 2, beats=4)
+    song.add(riser(BAR, 1.2), 2)
+    # map: 1 回目のドロップ(ドーン + クラッシュ)
+    song.add(impact(), 3, 0, 'drums'); song.add(crash(), 3, 0, 'drums'); song.add(taiko(True, 1.2), 3, 0, 'drums')
+    for b in (3, 4):
+        drums(song, b, level=2); chords(song, b, pb(b) + 4, stutter=(b == 4)); bassline(song, b, pb(b) + 4)
+        koto16(song, b, pb(b) + 4, gain=0.4)
+    # トピック: フルのドロップ(リード + 篠笛 + 三味線 + 琴)
+    for b in range(5, 13):
+        drums(song, b, level=2); chords(song, b, pb(b), stutter=(pb(b) % 4 == 3)); bassline(song, b, pb(b))
+        hook(song, b, pb(b)); shamisen16(song, b, pb(b), gain=0.35)
+        if pb(b) % 4 == 0: song.add(crash(0.7), b, 0, 'drums'); song.add(taiko(True), b, 0, 'drums')
+    # montage: いちばんアガる(1 オクターブ上のリード + 琴 + 太鼓連打、最後にスネア連打とライザー)
+    for b in range(13, 17):
+        drums(song, b, level=2); chords(song, b, pb(b), level=1.15, stutter=True); bassline(song, b, pb(b))
+        hook(song, b, pb(b), octave=12, gain=0.9, with_fue=False); koto16(song, b, pb(b), gain=0.45, up=24)
+        for q in range(4): song.add(taiko(True, 0.8), b, q, 'drums')
+    song.add(crash(), 13, 0, 'drums')
+    snare_roll(song, 16, beats=2, start=2, gain=1.0)
+    song.add(riser(BEAT * 2, 1.2), 16, 2)
+    # ending: もう 1 回だけ爆発 → D の和音と琴で決めて終わる
+    song.add(impact(1.2), 17, 0, 'drums'); song.add(crash(1.2), 17, 0, 'drums')
+    for b in (17, 18):
+        drums(song, b, level=2); chords(song, b, pb(b), level=1.1, stutter=(b == 18)); bassline(song, b, pb(b))
+        hook(song, b, pb(b), octave=12, gain=0.9)
+    song.kick(19, 0, 1.3); song.add(impact(1.1), 19, 0, 'drums'); song.add(crash(1.2), 19, 0, 'drums')
+    song.add(taiko(True, 1.3), 19, 0, 'drums')
+    # 決めの和音は映像の終わり(bar 22)まで伸ばす
+    n_end = int((BAR * 3 + TAIL) * SR)
+    song.add(supersaw([62, 66, 69, 74, 78], BAR * 3 + TAIL, cut=4000) * np.exp(-np.arange(n_end) / SR * 0.55), 19, gain=1.4)
+    song.add(saw_bass(38, BAR * 2) * np.exp(-np.arange(int(BAR * 2 * SR)) / SR * 0.8), 19)
+    song.add(fue(74, BAR * 2.5), 19, 1, gain=0.9)
+    for k, m in enumerate([62, 66, 69, 74, 78, 81, 86]): song.add(koto(m, 1.2), 19, k * 0.12, pan=(k - 3) / 6, gain=0.8)
 
     mix = song.render()
-    cuts = {'intro': (0, 2), 'map': (2, 3), 'montage': (11, 14), 'ending': (14, None)}
-    # トピックは 2 周目(前の小節の余韻を含んだ状態)から切り出す。bar 7〜10 = G, A, F#m, Bm
-    for i, k in enumerate('abcd'): cuts[f'spot_{k}'] = (7 + i, 8 + i)
+    cuts = {'intro': (0, 3), 'map': (3, 5), 'montage': (13, 17), 'ending': (17, None)}
+    for i, k in enumerate('abcd'): cuts[f'spot_{k}'] = (9 + i, 10 + i)  # 2 周目から切り出す(G, A, F#m, Bm)
     for name, (a, b) in cuts.items():
         seg = mix[int(round(a * BAR * SR)): (int(round(b * BAR * SR)) if b else None)]
         with wave.open(os.path.join(OUT, name + '.wav'), 'wb') as w:
             w.setnchannels(2); w.setsampwidth(2); w.setframerate(SR); w.writeframes((seg * 32767).astype(np.int16).tobytes())
         print('wrote', name, round(len(seg) / SR, 3), 's')
-    # 確認用に通しの曲も書き出す(PV には使わない)
     with wave.open(os.path.join(os.path.dirname(__file__), '_full_song.wav'), 'wb') as w:
         w.setnchannels(2); w.setsampwidth(2); w.setframerate(SR); w.writeframes((mix * 32767).astype(np.int16).tobytes())
 
